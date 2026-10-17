@@ -1,0 +1,6 @@
+{
+  "name": "Bisca Real — Salão de Cartas Tradicional",
+  "description": "Jogo clássico de Bisca (Bisca de 3 e Bisca de 9) com baralho de 40 cartas, inteligência artificial tática e efeitos sonoros.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
