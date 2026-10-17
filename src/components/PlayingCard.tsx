@@ -66,7 +66,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
 }) => {
   const dimensions = {
     sm: 'w-[72px] h-[104px] rounded-lg',
-    md: 'w-[100px] h-[144px] sm:w-[112px] sm:h-[162px] rounded-xl',
+    md: 'w-[76px] h-[110px] sm:w-[112px] sm:h-[162px] rounded-xl',
     lg: 'w-[118px] h-[170px] sm:w-[130px] sm:h-[188px] rounded-xl',
   }[size];
 
@@ -194,7 +194,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
       >
         <span
           className={`font-display font-bold tracking-tight ${
-            size === 'sm' ? 'text-sm' : 'text-lg sm:text-xl'
+            size === 'sm' ? 'text-sm' : 'text-base sm:text-xl'
           }`}
         >
           {card.rank}
@@ -211,7 +211,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
 
       {/* Top-Right Trump Crown or Point Value Indicator */}
       {size !== 'sm' && (
-        <div className="absolute top-2 right-2.5 flex flex-col items-end gap-0.5 pointer-events-none">
+        <div className="hidden sm:flex absolute top-2 right-2.5 flex-col items-end gap-0.5 pointer-events-none">
           {isTrumpSuit && (
             <span
               title="Naipe de Trunfo"
@@ -236,7 +236,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
       <div className="w-full h-full flex flex-col items-center justify-center px-2.5 pointer-events-none">
         {card.rank === 'A' ? (
           <div className="relative flex flex-col items-center justify-center">
-            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full border-2 border-[#D97706]/55 bg-[#FEF3C7]/55 flex items-center justify-center shadow-inner">
+            <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-full border-2 border-[#D97706]/55 bg-[#FEF3C7]/55 flex items-center justify-center shadow-inner">
               <SuitSvg
                 suit={card.suit}
                 className={
@@ -311,7 +311,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
       >
         <span
           className={`font-display font-bold tracking-tight ${
-            size === 'sm' ? 'text-sm' : 'text-lg sm:text-xl'
+            size === 'sm' ? 'text-sm' : 'text-base sm:text-xl'
           }`}
         >
           {card.rank}

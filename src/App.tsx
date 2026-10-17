@@ -1916,7 +1916,7 @@ export default function App() {
 
   return (
     <div
-      className={`relative w-screen h-screen overflow-hidden baize-surface select-none flex flex-col justify-between ${shakeClass}`}
+      className={`relative w-screen h-[100dvh] overflow-hidden baize-surface select-none flex flex-col justify-between ${shakeClass}`}
     >
       {/* 60fps Isolated Particle, Shockwave & Trump Slash Canvas */}
       <ParticleCanvas ref={particleRef} />
@@ -2029,8 +2029,8 @@ export default function App() {
       {gameState === 'TITLE_MENU' && (
         <main className="relative z-30 w-full h-full flex flex-col justify-between px-5 py-4 sm:px-10 sm:py-6 overflow-y-auto">
           {/* Top Perimeter Controls */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs text-[#D6C7B2]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#D6C7B2]">
               <span>Império do Brasil (1822–1889)</span>
               <span aria-hidden="true">·</span>
               <span>Sistema de Ímpeto (100 PI)</span>
@@ -2449,7 +2449,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleStartNewMatch}
-                className={`w-full py-3.5 px-6 rounded-xl font-display font-bold text-base sm:text-lg tracking-wide flex items-center justify-center gap-2.5 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`w-full py-3 sm:py-3.5 px-4 sm:px-6 rounded-xl font-display font-bold text-sm sm:text-lg tracking-wide flex items-center justify-center gap-2 sm:gap-2.5 transition-all cursor-pointer whitespace-normal sm:whitespace-nowrap shrink-0 ${
                   matchMode === 'VS_ONLINE'
                     ? 'bg-gradient-to-b from-[#10B981] to-[#059669] hover:from-[#34D399] hover:to-[#047857] text-[#052E16] shadow-[0_10px_25px_rgba(16,185,129,0.35)]'
                     : 'bg-gradient-to-b from-[#F59E0B] to-[#D97706] hover:from-[#FBBF24] hover:to-[#B45309] text-[#1B0E07] shadow-[0_10px_25px_rgba(217,119,6,0.4)]'
@@ -2562,15 +2562,16 @@ export default function App() {
           STATE 2: ACTIVE PLAYFIELD (Low-Occlusion Imperial Table View)
       ===================================================================== */}
       {gameState !== 'TITLE_MENU' && gameState !== 'ONLINE_LOBBY' && (
-        <div className="relative z-30 w-full h-full flex flex-col justify-between p-4 sm:p-6">
+        <div className="relative z-30 w-full h-full min-h-0 flex flex-col justify-between p-2 sm:p-6">
           {/* TOP PERIMETER HUD BAR */}
-          <div className="flex items-start justify-between gap-4 pointer-events-none">
+          <div className="flex flex-wrap items-start justify-between gap-2 sm:flex-nowrap sm:gap-4 pointer-events-none">
             {/* Left Cluster: Match Tentos & Hand Points */}
-            <div className="pointer-events-auto walnut-rail rounded-xl border border-[#FBBF24]/30 px-4 py-2.5 flex items-center gap-5 shadow-lg">
+            <div className="pointer-events-auto order-1 sm:order-none walnut-rail rounded-xl border border-[#FBBF24]/30 px-2.5 py-1.5 sm:px-4 sm:py-2.5 flex items-center gap-2 sm:gap-5 shadow-lg">
               <div>
-                <div className="text-[11px] text-[#D6C7B2] flex items-center gap-2">
-                  <span>
-                    Mão #{roundNumber} · Tentos (Meta {MATCH_TARGET_TENTOS})
+                <div className="text-[10px] sm:text-[11px] text-[#D6C7B2] flex items-center gap-1.5 sm:gap-2">
+                  <span className="whitespace-nowrap">Mão #{roundNumber}</span>
+                  <span className="hidden sm:inline whitespace-nowrap">
+                    · Tentos (Meta {MATCH_TARGET_TENTOS})
                   </span>
                   {matchMode === 'VS_ONLINE' && activeOnlineRoomCode && (
                     <span className="px-1.5 py-0.5 rounded bg-[#064E3B] border border-[#34D399]/50 font-mono-num text-[10px] text-[#6EE7B7] font-bold">
@@ -2578,11 +2579,11 @@ export default function App() {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mt-0.5 font-mono-num text-sm font-bold">
+                <div className="flex flex-col items-start sm:flex-row sm:items-center gap-0.5 sm:gap-3 mt-0.5 font-mono-num text-[10px] sm:text-sm font-bold whitespace-nowrap">
                   <span className="text-[#34D399]">
                     {displayUsername}: {playerTentos}/{MATCH_TARGET_TENTOS}
                   </span>
-                  <span className="text-white/30">·</span>
+                  <span className="hidden sm:inline text-white/30">·</span>
                   <span className="text-[#FBBF24]">
                     {opponentShortName}: {botTentos}/{MATCH_TARGET_TENTOS}
                   </span>
@@ -2618,43 +2619,49 @@ export default function App() {
             </div>
 
             {/* Center Opponent Zone (Avatar + Opponent Impeto Bar + Fanned Hand) */}
-            <div className="pointer-events-auto flex flex-col items-center">
-              <div className="walnut-rail rounded-xl border border-[#FBBF24]/35 px-3.5 py-2 flex items-center gap-3 shadow-md max-w-md">
-                <OpponentAvatar opponentId={opponentId} className="w-9 h-9" />
+            <div className="pointer-events-auto order-3 w-full sm:order-none sm:w-auto flex flex-col items-center">
+              <div className="walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-md w-full sm:w-auto max-w-md">
+                <OpponentAvatar
+                  opponentId={opponentId}
+                  className="w-7 h-7 sm:w-9 sm:h-9"
+                />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-display font-bold text-xs sm:text-sm text-[#FBF7EE] truncate flex items-center gap-1.5">
+                  <div className="flex items-center justify-between gap-2 sm:gap-3">
+                    <span className="font-display font-bold text-[11px] sm:text-sm text-[#FBF7EE] truncate flex items-center gap-1 sm:gap-1.5">
                       {matchMode === 'VS_ONLINE' && (
                         <span
-                          className={`w-2 h-2 rounded-full ${
+                          className={`w-2 h-2 rounded-full shrink-0 ${
                             onlineOpponentConnected
                               ? 'bg-[#34D399]'
                               : 'bg-[#F87171]'
                           }`}
                         />
                       )}
-                      <span>
+                      <span className="truncate">
                         {opponentDisplayName}
                         {matchMode === 'VS_ONLINE'
                           ? ` (${activeOpponent.shortName})`
                           : ''}
                       </span>
                     </span>
-                    <span className="font-mono-num text-xs text-[#FBBF24] shrink-0">
+                    <span className="font-mono-num text-[11px] sm:text-xs text-[#FBBF24] shrink-0">
                       {botCurrentPoints} pts
                     </span>
                   </div>
 
                   {/* Opponent Barra de Ímpeto (0-100 PI) */}
-                  <div className="mt-1 flex items-center gap-2">
-                    <div className="w-28 sm:w-36 h-1.5 rounded-full bg-black/60 overflow-hidden border border-white/10">
+                  <div className="mt-1 flex items-center gap-1.5 sm:gap-2">
+                    <div className="w-16 sm:w-36 h-1.5 rounded-full bg-black/60 overflow-hidden border border-white/10">
                       <div
                         style={{ width: `${botImpeto}%` }}
                         className="h-full bg-gradient-to-r from-[#F59E0B] to-[#EF4444] transition-all duration-300"
                       />
                     </div>
                     <span className="font-mono-num text-[10px] text-[#FBBF24]">
-                      Ímpeto: {botImpeto}/100 PI
+                      <span className="sm:hidden">{botImpeto} PI</span>
+                      <span className="hidden sm:inline">
+                        Ímpeto: {botImpeto}/100 PI
+                      </span>
                     </span>
                   </div>
                 </div>
@@ -2662,7 +2669,7 @@ export default function App() {
 
               {/* Opponent Fanned Cards (Face-Up if Revealed by Dom Pedro II's Gabinete de Conciliação!) */}
               <div
-                className="mt-2 flex items-center justify-center"
+                className="mt-1 sm:mt-2 h-[74px] sm:h-auto flex items-start justify-center origin-top scale-[0.64] sm:scale-100"
                 aria-label={`Mão de ${opponentDisplayName} com ${botHand.length} cartas`}
               >
                 <AnimatePresence initial={false}>
@@ -2699,14 +2706,14 @@ export default function App() {
             </div>
 
             {/* Right Cluster: Utility Controls */}
-            <div className="pointer-events-auto flex items-center gap-2">
+            <div className="pointer-events-auto order-2 sm:order-none flex items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={() => {
                   soundFx.playButtonTap();
                   setIsHistoryDrawerOpen((prev) => !prev);
                 }}
-                className={`px-3 py-2 rounded-lg walnut-rail border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                className={`px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg walnut-rail border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   isHistoryDrawerOpen
                     ? 'border-[#FBBF24] text-[#FBBF24]'
                     : 'border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24]'
@@ -2725,7 +2732,7 @@ export default function App() {
                   soundFx.playButtonTap();
                   setIsRulesOpen(true);
                 }}
-                className="p-2 rounded-lg walnut-rail border border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 rounded-lg walnut-rail border border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer"
                 title="Regras e Poderes [R]"
                 aria-label="Abrir regras"
               >
@@ -2738,7 +2745,7 @@ export default function App() {
                   const muted = soundFx.toggleMute();
                   setIsMuted(muted);
                 }}
-                className="p-2 rounded-lg walnut-rail border border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 rounded-lg walnut-rail border border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer"
                 title="Alternar Áudio [M]"
                 aria-label={isMuted ? 'Ativar som' : 'Silenciar som'}
               >
@@ -2755,7 +2762,7 @@ export default function App() {
                   soundFx.playButtonTap();
                   setGameState('PAUSED');
                 }}
-                className="p-2 rounded-lg walnut-rail border border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer"
+                className="p-1.5 sm:p-2 rounded-lg walnut-rail border border-[#FBBF24]/25 text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer"
                 title="Pausar Partida [Esc]"
                 aria-label="Pausar partida"
               >
@@ -2767,19 +2774,20 @@ export default function App() {
           {/* =================================================================
               MIDDLE ARENA: LEFT TRUMP & STOCK DECK + CENTER BATTLE ZONE
           ================================================================= */}
-          <div className="relative flex-1 flex items-center justify-center my-1">
+          <div className="relative flex-1 min-h-0 sm:min-h-[min-content] flex flex-col sm:flex-row items-center justify-center my-1 gap-1 sm:gap-0">
             {/* Left Side: Trump Card & Stock Pile (Monte de Compra) */}
-            <div className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 flex flex-col items-start gap-3 z-20">
+            <div className="z-20 flex flex-row flex-wrap justify-center sm:justify-start items-center gap-2 sm:absolute sm:left-6 sm:top-1/2 sm:-translate-y-1/2 sm:flex-col sm:items-start sm:gap-3">
               {/* Trump Suit Persistent Indicator */}
-              <div className="walnut-rail rounded-xl border border-[#FBBF24]/35 px-3.5 py-2 flex items-center gap-2.5 shadow-lg">
-                <div className="w-7 h-7 rounded-lg bg-[#FEF3C7] flex items-center justify-center">
-                  <SuitSvg suit={trumpSuit} className="w-4 h-4" />
+              <div className="walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-3.5 sm:py-2 flex items-center gap-1.5 sm:gap-2.5 shadow-lg shrink-0">
+                <div className="w-5 h-5 sm:w-7 sm:h-7 rounded-lg bg-[#FEF3C7] flex items-center justify-center shrink-0">
+                  <SuitSvg suit={trumpSuit} className="w-3 h-3 sm:w-4 sm:h-4" />
                 </div>
                 <div>
-                  <div className="text-[10px] text-[#D6C7B2] uppercase tracking-wider">
-                    Trunfo Imperial
+                  <div className="text-[9px] sm:text-[10px] text-[#D6C7B2] uppercase tracking-wider whitespace-nowrap">
+                    <span className="sm:hidden">Trunfo</span>
+                    <span className="hidden sm:inline">Trunfo Imperial</span>
                   </div>
-                  <div className="font-display font-bold text-sm text-[#FBBF24]">
+                  <div className="font-display font-bold text-xs sm:text-sm text-[#FBBF24] whitespace-nowrap">
                     {SUIT_INFO[trumpSuit].name}
                   </div>
                 </div>
@@ -2787,7 +2795,7 @@ export default function App() {
 
               {/* Stock Deck + Perpendicular Face-Up Trump Card */}
               {stock.length > 0 ? (
-                <div className="relative flex items-center h-[130px] w-[165px] sm:w-[190px]">
+                <div className="relative flex items-center h-[88px] w-[140px] sm:h-[130px] sm:w-[190px]">
                   {trumpCard && (
                     <motion.div
                       key={trumpCard.id}
@@ -2798,7 +2806,7 @@ export default function App() {
                         stiffness: 300,
                         damping: 20,
                       }}
-                      className="absolute left-12 sm:left-14 top-1/2 -translate-y-1/2"
+                      className="absolute left-6 sm:left-14 top-1/2 -translate-y-1/2"
                       title={`Carta de Trunfo na mesa: ${getCardDisplayName(trumpCard)}`}
                     >
                       <PlayingCard
@@ -2827,7 +2835,7 @@ export default function App() {
                 <motion.div
                   initial={{ scale: 0.9, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  className="rounded-xl border border-[#FBBF24]/30 bg-black/40 px-3.5 py-2.5 text-xs text-[#D6C7B2]"
+                  className="rounded-xl border border-[#FBBF24]/30 bg-black/40 px-2.5 py-1.5 sm:px-3.5 sm:py-2.5 text-[11px] sm:text-xs text-[#D6C7B2]"
                 >
                   <div className="font-semibold text-[#FBBF24]">
                     Monte Esgotado
@@ -2849,7 +2857,7 @@ export default function App() {
                   whileTap={{ scale: 0.96 }}
                   type="button"
                   onClick={handleSwapTrump}
-                  className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#F59E0B] to-[#D97706] text-[#1B0E07] text-xs font-bold flex items-center gap-2 shadow-[0_0_20px_rgba(251,191,36,0.5)] cursor-pointer whitespace-nowrap shrink-0"
+                  className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-gradient-to-r from-[#F59E0B] to-[#D97706] text-[#1B0E07] text-[11px] sm:text-xs font-bold flex items-center gap-1.5 sm:gap-2 shadow-[0_0_20px_rgba(251,191,36,0.5)] cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <ArrowLeftRight className="w-3.5 h-3.5" />
                   <span>Trocar pelo 2 de Trunfo [T]</span>
@@ -2860,7 +2868,7 @@ export default function App() {
             {/* Center Trick Battle Arena (Vaza Atual) */}
             <div className="relative flex flex-col items-center justify-center">
               {/* Active Power Status Badges above Center Ring */}
-              <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
+              <div className="mb-1 sm:mb-2 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
                 {trickPointMultiplier > 1 && (
                   <span className="px-3 py-1 rounded-lg bg-[#D97706]/30 border border-[#FBBF24] text-xs font-mono-num font-bold text-[#FEF08A] flex items-center gap-1.5 shadow">
                     <Crown className="w-3.5 h-3.5" />
@@ -2919,7 +2927,7 @@ export default function App() {
 
               {/* Center Baize Inscribed Imperial Ring */}
               <div
-                className={`relative w-[290px] h-[205px] sm:w-[380px] sm:h-[235px] rounded-3xl border transition-colors duration-300 flex items-center justify-center gap-5 sm:gap-8 px-4 shadow-inner ${
+                className={`relative w-[290px] h-[134px] sm:w-[380px] sm:h-[235px] rounded-3xl border transition-colors duration-300 flex items-center justify-center gap-4 sm:gap-8 px-3 sm:px-4 shadow-inner ${
                   currentTrickPoints >= 10 || trickPointMultiplier > 1
                     ? 'border-[#FBBF24]/65 bg-[#D97706]/10 shadow-[inset_0_0_35px_rgba(251,191,36,0.2)]'
                     : 'border-[#FBBF24]/20 bg-black/15'
@@ -3020,7 +3028,7 @@ export default function App() {
               </div>
 
               {/* Live Trick Points & Impeto Resolution Telemetry Below Center Ring */}
-              <div className="mt-2.5 h-8 flex items-center justify-center">
+              <div className="mt-1.5 sm:mt-2.5 h-7 sm:h-8 flex items-center justify-center">
                 {trickFeedback ? (
                   <motion.div
                     initial={{ opacity: 0, y: 6, scale: 0.92 }}
@@ -3156,31 +3164,31 @@ export default function App() {
           ================================================================= */}
           <div className="flex flex-col items-center justify-end pb-1">
             {/* Player Character + Barra de Força (Ímpeto 0-100 PI) + Power Button */}
-            <div className="mb-2.5 walnut-rail rounded-xl border border-[#FBBF24]/35 px-4 py-2 flex flex-wrap items-center justify-center gap-4 shadow-lg">
+            <div className="mb-1.5 sm:mb-2.5 w-full max-w-md sm:w-auto sm:max-w-none walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-4 sm:py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 sm:gap-4 shadow-lg">
               {/* Player Identity */}
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 sm:gap-2.5">
                 <OpponentAvatar
                   opponentId={playerCharacterId}
-                  className="w-8 h-8"
+                  className="w-7 h-7 sm:w-8 sm:h-8"
                 />
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-display font-bold text-xs sm:text-sm text-[#FBF7EE]">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <span className="font-display font-bold text-[11px] sm:text-sm text-[#FBF7EE] whitespace-nowrap">
                       {displayUsername}
                     </span>
-                    <span className="text-[11px] text-[#D6C7B2]">
+                    <span className="hidden sm:inline text-[11px] text-[#D6C7B2]">
                       ({playerCharacter.shortName})
                     </span>
                   </div>
-                  <div className="text-[10px] text-[#34D399] font-mono-num">
+                  <div className="text-[9px] sm:text-[10px] text-[#34D399] font-mono-num whitespace-nowrap max-w-[84px] sm:max-w-none truncate">
                     Poder: {playerCharacter.power.name}
                   </div>
                 </div>
               </div>
 
               {/* Barra de Força (Ímpeto 0 a 100 PI) */}
-              <div className="flex items-center gap-2.5">
-                <div className="w-32 sm:w-44 h-2.5 rounded-full bg-black/65 border border-[#FBBF24]/30 overflow-hidden p-0.5">
+              <div className="flex items-center gap-2 sm:gap-2.5">
+                <div className="w-16 sm:w-44 h-2.5 rounded-full bg-black/65 border border-[#FBBF24]/30 overflow-hidden p-0.5">
                   <motion.div
                     initial={false}
                     animate={{ width: `${playerImpeto}%` }}
@@ -3192,7 +3200,7 @@ export default function App() {
                     }`}
                   />
                 </div>
-                <span className="font-mono-num text-xs font-bold text-[#FBBF24]">
+                <span className="hidden sm:inline font-mono-num text-[11px] sm:text-xs font-bold text-[#FBBF24] whitespace-nowrap">
                   {playerImpeto}/100 PI
                 </span>
               </div>
@@ -3202,14 +3210,19 @@ export default function App() {
                 type="button"
                 disabled={!playerCanActivatePower}
                 onClick={handleActivatePlayerPower}
-                className={`px-3.5 py-1.5 rounded-lg font-display font-bold text-xs flex items-center gap-1.5 transition-all whitespace-nowrap shrink-0 ${
+                className={`px-2.5 py-1.5 sm:px-3.5 rounded-lg font-display font-bold text-[11px] sm:text-xs flex items-center gap-1 sm:gap-1.5 transition-all whitespace-nowrap shrink-0 ${
                   playerCanActivatePower
                     ? 'bg-gradient-to-r from-[#F59E0B] to-[#10B981] text-[#1B0E07] shadow-[0_0_20px_rgba(251,191,36,0.65)] hover:scale-105 cursor-pointer'
                     : 'bg-black/40 border border-white/10 text-[#D6C7B2]/45 cursor-not-allowed'
                 }`}
               >
-                <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>
+                <Zap className="w-3.5 h-3.5 fill-current shrink-0" />
+                <span className="sm:hidden">
+                  {playerImpeto >= 100
+                    ? 'Ativar Poder [P]'
+                    : `Poder (${playerImpeto}%)`}
+                </span>
+                <span className="hidden sm:inline">
                   {playerImpeto >= 100
                     ? `Ativar ${playerCharacter.power.name} [P]`
                     : `Carregando Poder (${playerImpeto}%)`}
@@ -3219,7 +3232,7 @@ export default function App() {
 
             {/* Player Fanned Interactive Cards */}
             <div
-              className="flex items-center justify-center pb-1 max-w-full overflow-x-visible"
+              className="flex items-center justify-center pb-2 sm:pb-1 max-w-full"
               role="region"
               aria-label="Sua mão de cartas"
             >
@@ -3263,13 +3276,14 @@ export default function App() {
                         stiffness: 350,
                         damping: 25,
                       }}
+                      className={
+                        idx === 0
+                          ? ''
+                          : isManyCards
+                          ? '-ml-[48px] sm:-ml-[22px]'
+                          : '-ml-[10px] sm:ml-[10px]'
+                      }
                       style={{
-                        marginLeft:
-                          idx === 0
-                            ? '0px'
-                            : isManyCards
-                            ? '-22px'
-                            : '10px',
                         zIndex: 10 + idx,
                       }}
                     >
