@@ -1192,7 +1192,8 @@ async function startServer() {
     });
   }
 
-  const PORT = 3000;
+  // Render/Railway/Fly.io inject the port via env; fall back to 3000 locally.
+  const PORT = Number(process.env.PORT) || 3000;
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Bisca Imperial Server & WebSocket running on port ${PORT}`);
   });

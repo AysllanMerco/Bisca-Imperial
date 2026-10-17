@@ -331,8 +331,14 @@ export default function App() {
   );
 
   useEffect(() => {
+    // Prefer an explicit realtime server URL (VITE_WS_URL) when the front-end is
+    // hosted separately from the WebSocket server; otherwise use the same host.
+    const explicitWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws-bisca`;
+    const wsUrl =
+      explicitWsUrl && explicitWsUrl.trim().length > 0
+        ? explicitWsUrl
+        : `${protocol}//${window.location.host}/ws-bisca`;
     let ws: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let unmounted = false;
