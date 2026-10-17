@@ -38,29 +38,37 @@ NODE_ENV=production npm start   # serve dist/ + /ws-bisca
 
 ## Deploy
 
-### Opção recomendada — servidor no Render (grátis) + front no Vercel
+### ✅ Padrão do projeto — tudo no Render (um único serviço)
 
-Mantém o site rápido no Vercel e adiciona só o servidor de tempo real.
+O mesmo processo Node serve o jogo **e** o WebSocket, então o multiplayer
+funciona sem nenhuma variável de ambiente e sem depender de outro host.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/AysllanMerco/Bisca-Imperial)
 
-1. **Render** → *New* → *Web Service* → conecte `AysllanMerco/Bisca-Imperial`.
-   - Build Command: `npm install --include=dev && npm run build`
-   - Start Command: `npm start`
-   - Environment: `NODE_ENV=production`
-   - (Há um `render.yaml` pronto para o fluxo de *Blueprint*.)
-2. Confirme o WebSocket respondendo: `https://<seu-app>.onrender.com/api/health`.
-3. **Vercel** → *Settings* → *Environment Variables*: adicione
-   `VITE_WS_URL = wss://<seu-app>.onrender.com/ws-bisca` e faça **Redeploy**.
+1. **Render** → *New* → **Blueprint** → conecte `AysllanMerco/Bisca-Imperial`.
+   O Render lê o `render.yaml` já pronto e cria o serviço com build
+   `npm install --include=dev && npm run build`, start `npm start`,
+   health check em `/api/health` e `NODE_ENV=production`.
 
-### Opção simples — tudo no Render
-
-Um único serviço serve o jogo inteiro; o front usa o próprio domínio e o
-multiplayer funciona sem variáveis de ambiente.
+   (Alternativa manual: *New* → *Web Service* com essas mesmas configurações.)
+2. Confirme que o serviço subiu: `https://<seu-app>.onrender.com/api/health`
+   deve responder `{"status":"ok","roomsCount":0}`.
+3. Abra `https://<seu-app>.onrender.com` e teste em duas abas/dispositivos:
+   **Salão Online** → o matchmaking coloca os dois na mesma sala.
 
 > O plano gratuito do Render "dorme" após ~15 min sem acesso (o primeiro
 > carregamento demora alguns segundos). Para manter aquecido, aponte um
 > monitor externo (ex.: cron-job.org) para `/api/health` a cada 10 min.
+
+### Alternativa — front no Vercel + servidor no Render
+
+Só vale a pena se você quiser manter os assets estáticos no Vercel. Nesse caso
+o front precisa saber onde está o WebSocket:
+
+1. Crie o serviço no Render como acima.
+2. **Vercel** → *Settings* → *Environment Variables*: adicione
+   `VITE_WS_URL = wss://<seu-app>.onrender.com/ws-bisca` e faça **Redeploy**.
+   (Sem isso, o front tenta `wss://<dominio-do-vercel>/ws-bisca` e falha.)
 
 ## Estrutura
 
