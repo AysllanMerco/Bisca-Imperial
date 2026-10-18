@@ -77,6 +77,17 @@ const HERO_DEMO_CARDS: Card[] = [
 
 const MATCH_TARGET_TENTOS = 4;
 
+// Ritmo da IA (modo VS_BOT).
+// Antes a IA jogava em 680 ms: no celular a mesa atualizava tao rapido que
+// ficava intenso e com cara de travamento. Aqui ela "pensa" um pouco mais,
+// com uma variacao curta para nao ficar mecanica.
+const BOT_THINK_MIN_MS = 1500;
+const BOT_THINK_JITTER_MS = 700;
+
+function botThinkDelay(): number {
+  return BOT_THINK_MIN_MS + Math.random() * BOT_THINK_JITTER_MS;
+}
+
 /** Icon map for the quick-taunt bar (F1–F4). */
 const TAUNT_ICONS: Record<
   string,
@@ -2070,7 +2081,7 @@ export default function App() {
           workingBBonus
         );
       }
-    }, 680);
+    }, botThinkDelay());
 
     return () => {
       if (botTimerRef.current) {
