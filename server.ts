@@ -47,13 +47,26 @@ const ROOM_GRACE_PERIOD_MS = 5 * 60 * 1000;
  * como fatality e devolve o jogador ao lobby, o que seria errado para uma
  * jogada apenas ilegal (ex.: carta fora de regra).
  */
+/**
+ * Ultimo resync por sala (ms). Uma acao invalida normalmente responde com um
+ * snapshot completo; se o cliente martela cliques invalidos, limitamos esse
+ * reenvio para nao multiplicar ~2,7 KB por clique no link do celular.
+ */
+const lastRejectResyncAtByRoom = new Map<string, number>();
+const REJECT_RESYNC_MIN_INTERVAL_MS = 600;
+
 function rejectAction(
   ws: WebSocket | null,
   room: GameRoom,
   message: string
 ): void {
   sendJson(ws, { type: 'room:action_rejected', message });
-  broadcastRoomState(room);
+  const now = Date.now();
+  const last = lastRejectResyncAtByRoom.get(room.roomCode) || 0;
+  if (now - last >= REJECT_RESYNC_MIN_INTERVAL_MS) {
+    lastRejectResyncAtByRoom.set(room.roomCode, now);
+    broadcastRoomState(room);
+  }
 }
 
 /** Anti-spam das provocacoes (canal social): clientId -> ultimo envio (ms). */
@@ -435,13 +448,33 @@ async function startServer() {
   const app = express();
   const httpServer = createServer(app);
 
+  // Nao anuncia a tecnologia (header extra em toda resposta; mobile paga latencia
+  // e bateria por header de graca).
+  app.disable('x-powered-by');
+
   // Healthcheck API
   app.get('/api/health', (_req, res) => {
+    res.set('Cache-Control', 'no-store');
     res.json({ status: 'ok', roomsCount: rooms.size });
   });
 
   // WebSocket Server for Real-Time Multiplayer Bisca
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws-bisca' });
+  //
+  // perMessageDeflate: cada `room:state` tem ~2-3 KB de JSON repetitivo e viaja
+  // para o celular a CADA jogada. Comprimindo os frames o consumo de dados cai
+  // ~60% (medido: ~2,7 KB -> ~1,1 KB por snapshot). `serverNoContextTakeover`
+  // mantem cada frame independente, para nao segurar memoria por conexao (plano
+  // gratis do Render), e `threshold` nao comprime frames pequenos.
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: '/ws-bisca',
+    perMessageDeflate: {
+      threshold: 512,
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+      zlibDeflateOptions: { level: 6, memLevel: 7 },
+    },
+  });
 
   wss.on('connection', (ws: WebSocket) => {
     let currentClientId = '';
@@ -1404,6 +1437,18 @@ async function startServer() {
       }
     }
     if (queueChanged) broadcastQueuePositions();
+
+    // Poda dos mapas auxiliares (anti-spam de provocacao e resync de rejeicao).
+    // Sem isso eles cresceriam por sempre numa instancia de vida longa.
+    const STALE_MS = 10 * 60 * 1000;
+    for (const [key, at] of lastTauntAtByClient) {
+      if (now - at > STALE_MS) lastTauntAtByClient.delete(key);
+    }
+    for (const [key, at] of lastRejectResyncAtByRoom) {
+      if (now - at > STALE_MS || !rooms.has(key)) {
+        lastRejectResyncAtByRoom.delete(key);
+      }
+    }
   }, 60000);
 
   // Vite middleware in development, static dist in production
@@ -1415,8 +1460,32 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
+    // O Vite gera nome de arquivo com HASH do conteudo, entao mudar de build
+    // sempre produz um nome novo. Isso permite cache "immutable" de 1 ano:
+    // o celular baixa o bundle (~150 KB) uma vez e nunca mais, e ainda evita
+    // uma ida ao servidor antes de paintar. E o maior ganho de peso no mobile
+    // que um backend consegue entregar sem tocar no front.
+    app.use(
+      '/assets',
+      express.static(path.join(distPath, 'assets'), {
+        immutable: true,
+        maxAge: '1y',
+      })
+    );
+    app.use(
+      express.static(distPath, {
+        index: false,
+        // index.html NUNCA pode ser cacheado de forma agresiva: e ele que aponta
+        // para o hash novo do bundle a cada deploy.
+        setHeaders(res, filePath) {
+          if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
