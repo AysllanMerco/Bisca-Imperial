@@ -34,6 +34,25 @@ export interface CharacterPowerSpec {
   exceptionHandlingNote: string;
 }
 
+// ============================================================================
+// PSICOLOGIA DE MESA: PROVOCAÇÕES (EMOTES) & HUMOR DA IA
+// ============================================================================
+export type TauntId = 'elogio' | 'coroa' | 'trunfo_bluff' | 'pressa';
+
+export interface TauntSpec {
+  id: TauntId;
+  label: string;
+  phrase: string;
+  iconName: string;
+}
+
+/**
+ * Temporary psychological state of the Bot caused by player taunts:
+ * - PROVOKED: Dom Pedro I took the bait and plays impulsively that trick.
+ * - CAUTIOUS: Leopoldina/Isabel suspect an ambush and hoard their Aces/7s.
+ */
+export type BotMood = 'NORMAL' | 'PROVOKED' | 'CAUTIOUS';
+
 export interface OpponentProfile {
   id: CharacterId;
   name: string;
@@ -50,6 +69,8 @@ export interface OpponentProfile {
   quoteWinBig: string;
   quoteTrumpCut: string;
   quotePowerActivate: string;
+  /** Personality-flavored automatic reply when the player taunts. */
+  quoteTauntResponse: string;
 }
 
 export interface PlayerEntity {
