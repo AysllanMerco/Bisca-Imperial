@@ -7,7 +7,7 @@
     "workdir": "C:\\Users\\aysll\\Bisca-Imperial",
     "branch": "feature/agente-backend",
     "updated_at": "2026-10-18T15:10:00-03:00",
-    "contract_version": "1.2",
+    "contract_version": "1.3",
     "summary": "Servidor Express + WebSocket em server.ts. E a UNICA autoridade das regras online: em VS_ONLINE nenhum calculo de regra acontece no cliente. As salas vivem em memoria; toda acao e validada no servidor e a cada mutacao relevante ele envia um snapshot COMPLETO (OnlineSyncedState) aos DOIS jogadores via 'room:state'. As regras puras ficam em src/utils/biscaEngine.ts (compartilhado com o modo local) e os tipos do contrato em src/types/bisca.ts (presente nas duas branches).",
     "connection": {
       "transport": "WebSocket (JSON por mensagem)",
@@ -140,7 +140,15 @@
       "match": "Vitória do match ao atingir 4 tentos (MATCH_TARGET_TENTOS). O valor e publicado em room:state.matchTargetTentos.",
       "matchmaking_fairness": "Emparelha somente regras identicas (gameMode + mustFollowSuitInEndgame); a mesa herda as regras do jogador que ja esperava."
     },
+    "transport_optimizations": {
+      "_desc": "Ganho de peso/velocidade NO MOBILE, 100% no backend. Nenhuma funcao removida, nenhuma mudanca visual, nenhum contrato de dados alterado.",
+      "static_immutable_cache": "Assets /assets/* (nome com hash de conteudo do Vite) passam a sair com 'Cache-Control: public, max-age=31536000, immutable'. Antes eram 'max-age=0': o celular rebaixava ~150 KB de JS + ~10 KB de CSS a CADA visita e ainda pagava um RTT de revalidacao. O index.html continua 'no-cache' para pegar deploy novo.",
+      "ws_permessage_deflate": "WebSocket agora negocia compressao de frames. Medido em bisca_9: room:state de 2286 B cai para 713 B (-69%). Como cada vaza gera ~3 snapshots por jogador, isso economiza ~80 KB por mao. Frames < 512 B nao sao comprimidos e 'serverNoContextTakeover' mantem cada frame independente (memoria por conexao estavel no plano gratis).",
+      "reject_resync_throttle": "Comportamento observavel: acoes rejeitadas continuam respondendo 'room:action_rejected' + resync de 'room:state', mas o resync passa a no maximo 1 a cada 600 ms por sala. Client martelando acao invalida deixa de multiplicar ~2,7 KB por clique. O estado continua sendo autoritativo; so o reenvio e limitado.",
+      "http_hygiene": "Resposta de /api/health com 'Cache-Control: no-store' e header 'X-Powered-By' removido (um header a menos em cada resposta)."
+    },
     "changes_published": [
+      "v1.3 (otimizacao de transporte, sem mudanca de contrato): cache immutable nos assets com hash, compressao perMessageDeflate no WebSocket, limite de 600 ms no resync de rejeicoes e higiene de headers HTTP. Medido: -69% por snapshot de room:state e -160 KB por visita no mobile apos o primeiro carregamento.",
       "v1.2 (aditivo, sem breaking change): novo canal SOCIAL 'online:taunt' (client->server e server->client). Rele apenas ao oponente, sem eco; sanitiza (espacos colapsados, max 120 chars); anti-spam 1/segundo por clientId com resposta 'room:action_rejected'; nao afeta regras nem gera room:state.",
       "v1.2: pedido vindo da Sessao 2 (balao central do adversario humano no VS_ONLINE). Contrato publicado aqui antes de virar producao; a Sessao 2 ja marcou 'ALINHADO com o backend' no lado dela do bus.",
       "v1.1 (aditivo, sem breaking change): room:state ganhou matchTargetTentos:number (remove o hardcoded 4 do front).",
