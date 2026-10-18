@@ -2797,6 +2797,20 @@ export default function App() {
                     </span>
                   </div>
 
+                  {/* Opponent Speech Bubble — right under his name and avatar */}
+                  {matchMode === 'VS_BOT' && botStatusText && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      className="mt-1.5 flex items-center justify-center pointer-events-none"
+                    >
+                      <div className="max-w-[260px] rounded-xl bg-[#D97706]/92 border border-[#FBBF24]/65 px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1B0E07] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
+                        {botStatusText}
+                      </div>
+                    </motion.div>
+                  )}
+
                   {/* Opponent Barra de Ímpeto (0-100 PI) */}
                   <div className="mt-1 flex items-center gap-1.5 sm:gap-2">
                     <div className="w-16 sm:w-36 h-1.5 rounded-full bg-black/60 overflow-hidden border border-white/10">
@@ -2851,20 +2865,6 @@ export default function App() {
                   })}
                 </AnimatePresence>
               </div>
-
-              {/* Opponent Speech Bubble (below his cards, top of screen) */}
-              {matchMode === 'VS_BOT' && botStatusText && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="mt-2 pointer-events-none flex items-center justify-center"
-                >
-                  <div className="max-w-[230px] rounded-xl bg-[#D97706]/92 border border-[#FBBF24]/65 px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1B0E07] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
-                    {botStatusText}
-                  </div>
-                </motion.div>
-              )}
             </div>
 
             {/* Right Cluster: Utility Controls */}
