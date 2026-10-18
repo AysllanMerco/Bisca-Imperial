@@ -2797,20 +2797,6 @@ export default function App() {
                     </span>
                   </div>
 
-                  {/* Opponent Speech Bubble — right under his name and avatar */}
-                  {matchMode === 'VS_BOT' && botStatusText && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      className="mt-1.5 flex items-center justify-center pointer-events-none"
-                    >
-                      <div className="max-w-[260px] rounded-xl bg-[#D97706]/92 border border-[#FBBF24]/65 px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1B0E07] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
-                        {botStatusText}
-                      </div>
-                    </motion.div>
-                  )}
-
                   {/* Opponent Barra de Ímpeto (0-100 PI) */}
                   <div className="mt-1 flex items-center gap-1.5 sm:gap-2">
                     <div className="w-16 sm:w-36 h-1.5 rounded-full bg-black/60 overflow-hidden border border-white/10">
@@ -3086,6 +3072,20 @@ export default function App() {
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              {/* Opponent Speech Bubble — center of screen, above the cards we play */}
+              {matchMode === 'VS_BOT' && botStatusText && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="mb-2 flex items-center justify-center pointer-events-none z-20"
+                >
+                  <div className="max-w-[320px] rounded-2xl bg-[#D97706]/94 border border-[#FBBF24]/70 px-3.5 py-2 text-sm sm:text-base font-bold text-[#1B0E07] shadow-2xl drop-shadow-[0_0_24px_rgba(0,0,0,0.6)] text-center whitespace-pre-line">
+                    {botStatusText}
+                  </div>
+                </motion.div>
+              )}
 
               {/* Center Baize Inscribed Imperial Ring */}
               <div
