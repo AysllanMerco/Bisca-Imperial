@@ -56,9 +56,34 @@ funciona sem nenhuma variável de ambiente e sem depender de outro host.
 3. Abra `https://<seu-app>.onrender.com` e teste em duas abas/dispositivos:
    **Salão Online** → o matchmaking coloca os dois na mesma sala.
 
-> O plano gratuito do Render "dorme" após ~15 min sem acesso (o primeiro
-> carregamento demora alguns segundos). Para manter aquecido, aponte um
-> monitor externo (ex.: cron-job.org) para `/api/health` a cada 10 min.
+> **Plano gratuito do Render:** o serviço "dorme" após **15 min sem tráfego**
+> (incluindo mensagens de WebSocket) e o próximo acesso paga um **cold start de
+> ~30–60 s** — é isso que dá a sensação de "o online travou/morreu".
+> Para o multiplayer ficar sempre instantâneo, mantenha o serviço acordado:
+> aponte um monitor externo (ex.: [cron-job.org](https://cron-job.org) ou
+> UptimeRobot) para `https://<seu-app>.onrender.com/api/health` **a cada 10 min**.
+> Um serviço sempre ligado consome ~730 h das 750 h gratuitas por mês.
+> (Enquanto você está em partida/lobby, o ping de keep-alive do jogo já conta
+> como tráfego e evita o sono.)
+
+### Resiliência da conexão online
+
+O cliente foi endurecido para o que o Render faz de verdade (redeploy e
+reinício de instância **derrubam todas as conexões**):
+
+- **Reconexão com backoff** (1 s → 2 s → 4 s → 8 s → 15 s), em vez de tentar
+  a cada 2 s para sempre;
+- **Retomada automática da partida**: ao reconectar, o cliente reenvia
+  `room:join` e o servidor religa a mesma cadeira e reenvia o estado — a mesa
+  continua de onde parou em vez de congelar;
+- **Se a sala não existe mais** (servidor reiniciado/redeploy), o jogador
+  recebe a mensagem clara *"Sala não encontrada"* e volta ao Salão, em vez de
+  ficar preso numa mesa morta sem resposta aos cliques;
+- **Keep-alive `ping`/`pong` a cada 25 s** + **watchdog**: detecta sockets
+  "zumbis" (celular trocando de rede) e força a reconexão;
+- **Retomada imediata** ao voltar o `online`/foco da aba, sem esperar o backoff;
+- **Heartbeat no servidor a cada 30 s** e limpeza de salas abandonadas, para o
+  processo não acumular memória em instâncias de longa duração.
 
 ### Alternativa — front no Vercel + servidor no Render
 
@@ -74,7 +99,7 @@ o front precisa saber onde está o WebSocket:
 
 ```
 server.ts                 # Express + WebSocket (/ws-bisca) + serve dist/
-src/App.tsx               # front-end React (conexão WS em ~linha 334)
+src/App.tsx               # front-end React (conexão WS + reconexão/resync)
 src/types/bisca.ts        # tipos compartilhados
 src/utils/biscaEngine.ts  # regras do jogo
 ```

@@ -339,15 +339,42 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
 
     let lastTime = performance.now();
     let rafId = 0;
+    let ambientAccumulator = 0;
+
+    // True while any burst/ring/slash is playing. The ambient dust layer on its
+    // own is slow and decorative, so it can be sampled at ~30fps; its motion is
+    // time-based, so the rendered result is identical while phones do half the
+    // full-screen canvas work.
+    const hasActiveEffects = () => {
+      const pool = poolRef.current;
+      for (let i = 0; i < pool.length; i++) if (pool[i].active) return true;
+      const rings = ringPoolRef.current;
+      for (let i = 0; i < rings.length; i++) if (rings[i].active) return true;
+      const slashes = slashPoolRef.current;
+      for (let i = 0; i < slashes.length; i++) if (slashes[i].active) return true;
+      return false;
+    };
 
     const tick = (now: number) => {
       const rawDt = (now - lastTime) / 1000;
       const dt = Math.min(rawDt, 0.05); // Clamped frame delta time
       lastTime = now;
 
+      if (hasActiveEffects()) {
+        ambientAccumulator = 0;
+      } else {
+        ambientAccumulator += rawDt;
+        if (ambientAccumulator < 1 / 30) {
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
+        ambientAccumulator = 0;
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // 1. Update & render subtle warm tavern dust motes
+      ctx.fillStyle = '#FDE68A';
       for (let i = 0; i < motes.length; i++) {
         const m = motes[i];
         m.phase += dt * 1.4;
@@ -361,14 +388,12 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
         if (m.x < -10) m.x = canvas.width + 10;
         if (m.x > canvas.width + 10) m.x = -10;
 
-        ctx.save();
         ctx.globalAlpha = m.alpha * (0.7 + 0.3 * Math.sin(m.phase));
-        ctx.fillStyle = '#FDE68A';
         ctx.beginPath();
         ctx.arc(m.x, m.y, m.radius, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
       }
+      ctx.globalAlpha = 1;
 
       // 2. Update & render Shockwave Rings
       const rings = ringPoolRef.current;

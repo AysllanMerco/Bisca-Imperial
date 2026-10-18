@@ -214,6 +214,20 @@ export default function App() {
   // Refs for timers, WebSocket & particles
   const particleRef = useRef<ParticleCanvasHandle | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  // Live link bookkeeping so a dropped socket can resume the match instead of
+  // leaving the board frozen (Render closes every socket on restart/redeploy).
+  const activeRoomCodeRef = useRef<string | null>(null);
+  const onlineProfileRef = useRef<{
+    username: string;
+    characterId: CharacterId;
+    gameMode: GameMode;
+    mustFollowSuitInEndgame: boolean;
+  }>({
+    username: 'Dom Viajante',
+    characterId: 'pedro_ii',
+    gameMode: 'bisca_3',
+    mustFollowSuitInEndgame: false,
+  });
   const lastSeenBannerIdRef = useRef<number>(0);
   const prevTrickLenRef = useRef<number>(0);
   const botTimerRef = useRef<number | null>(null);
@@ -236,6 +250,20 @@ export default function App() {
       // Ignore storage errors in sandboxed iframes
     }
   }, [username]);
+
+  // Mirror the values the reconnect logic needs, without re-creating the socket.
+  useEffect(() => {
+    activeRoomCodeRef.current = activeOnlineRoomCode;
+  }, [activeOnlineRoomCode]);
+
+  useEffect(() => {
+    onlineProfileRef.current = {
+      username,
+      characterId: playerCharacterId,
+      gameMode,
+      mustFollowSuitInEndgame,
+    };
+  }, [username, playerCharacterId, gameMode, mustFollowSuitInEndgame]);
 
   const clearTimers = useCallback(() => {
     if (botTimerRef.current) {
@@ -341,7 +369,26 @@ export default function App() {
         : `${protocol}//${window.location.host}/ws-bisca`;
     let ws: WebSocket | null = null;
     let reconnectTimer: number | null = null;
+    let keepAliveTimer: number | null = null;
+    let watchdogTimer: number | null = null;
+    let reconnectAttempt = 0;
+    let lastServerMessageAt = Date.now();
     let unmounted = false;
+
+    const stopConnectionTimers = () => {
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (keepAliveTimer) {
+        window.clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+      }
+      if (watchdogTimer) {
+        window.clearInterval(watchdogTimer);
+        watchdogTimer = null;
+      }
+    };
 
     const connect = () => {
       if (unmounted) return;
@@ -350,13 +397,60 @@ export default function App() {
 
       ws.onopen = () => {
         if (unmounted) return;
+        reconnectAttempt = 0;
+        lastServerMessageAt = Date.now();
         setWsConnected(true);
         ws?.send(JSON.stringify({ type: 'rooms:get', clientId }));
+
+        // Resume the match after a reconnect. The server drops every socket when
+        // the instance restarts (deploy / free-tier reboot), so without re-joining
+        // the player would stare at an obsolete board whose buttons do nothing.
+        const roomCode = activeRoomCodeRef.current;
+        if (roomCode) {
+          ws?.send(
+            JSON.stringify({
+              type: 'room:join',
+              roomCode,
+              clientId,
+              username: onlineProfileRef.current.username,
+              characterId: onlineProfileRef.current.characterId,
+            })
+          );
+        }
+
+        // Keep-alive ping: exposes half-open "zombie" sockets (common when a
+        // phone switches networks) and counts as inbound traffic on the free tier.
+        if (keepAliveTimer) window.clearInterval(keepAliveTimer);
+        keepAliveTimer = window.setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping', clientId }));
+          }
+        }, 25000);
+
+        // Dead-socket watchdog: a zombie socket reports OPEN but never answers,
+        // so the table would silently stop updating mid-match.
+        if (watchdogTimer) window.clearInterval(watchdogTimer);
+        watchdogTimer = window.setInterval(() => {
+          if (!activeRoomCodeRef.current) return;
+          if (Date.now() - lastServerMessageAt > 45000) {
+            try {
+              ws?.close();
+            } catch {
+              // onclose schedules the reconnect
+            }
+          }
+        }, 10000);
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          lastServerMessageAt = Date.now();
+
+          // Keep-alive reply: nothing to render.
+          if (msg.type === 'pong') {
+            return;
+          }
 
           if (msg.type === 'rooms:list') {
             setOpenRooms(msg.rooms || []);
@@ -376,6 +470,16 @@ export default function App() {
 
           if (msg.type === 'room:error') {
             setOnlineError(msg.message || 'Erro ao entrar na sala.');
+            // If we were mid-match, that table no longer exists (the server was
+            // restarted). Send the player back to the lobby with the reason
+            // instead of leaving them on a frozen board.
+            if (activeRoomCodeRef.current) {
+              activeRoomCodeRef.current = null;
+              setActiveOnlineRoomCode(null);
+              setWaitingRoomCode(null);
+              setIsSearchingQueue(false);
+              setGameState('ONLINE_LOBBY');
+            }
             return;
           }
 
@@ -546,16 +650,41 @@ export default function App() {
 
       ws.onclose = () => {
         if (unmounted) return;
+        stopConnectionTimers();
         setWsConnected(false);
-        reconnectTimer = window.setTimeout(connect, 2000);
+        // Exponential backoff (1s → 15s): a cold-starting free instance needs up
+        // to ~60s to boot, so retrying every 2s just burns battery and traffic.
+        reconnectAttempt += 1;
+        const delay = Math.min(1000 * 2 ** (reconnectAttempt - 1), 15000);
+        reconnectTimer = window.setTimeout(connect, delay);
       };
     };
 
     connect();
 
+    // Recover the instant the network or the app comes back, instead of waiting
+    // out the backoff timer — the classic mobile "travou e não volta" case.
+    const handleReconnectNow = () => {
+      if (unmounted) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        stopConnectionTimers();
+        reconnectAttempt = 0;
+        connect();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') handleReconnectNow();
+    };
+    window.addEventListener('online', handleReconnectNow);
+    window.addEventListener('focus', handleReconnectNow);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       unmounted = true;
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      stopConnectionTimers();
+      window.removeEventListener('online', handleReconnectNow);
+      window.removeEventListener('focus', handleReconnectNow);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (ws) ws.close();
     };
   }, [clientId, showBigMomentCallout]);

@@ -89,6 +89,8 @@ interface GameRoom {
   trickHistory: RoomHistoryEntry[];
   roundSummaryRaw: ReturnType<typeof computeRoundSummary> | null;
   resolveTimer: NodeJS.Timeout | null;
+  /** Last time either seat heard from the server; drives abandoned-room cleanup. */
+  lastActivityAt: number;
 }
 
 const rooms = new Map<string, GameRoom>();
@@ -299,6 +301,7 @@ function buildSyncedStateForSeat(
 }
 
 function broadcastRoomState(room: GameRoom): void {
+  room.lastActivityAt = Date.now();
   ([0, 1] as const).forEach((seatIdx) => {
     const seatObj = room.seats[seatIdx];
     if (seatObj && seatObj.ws) {
@@ -393,6 +396,11 @@ async function startServer() {
 
   wss.on('connection', (ws: WebSocket) => {
     let currentClientId = '';
+    const socket = ws as WebSocket & { isAlive?: boolean };
+    socket.isAlive = true;
+    ws.on('pong', () => {
+      socket.isAlive = true;
+    });
 
     // Immediately send open rooms list
     sendJson(ws, {
@@ -406,6 +414,15 @@ async function startServer() {
         const clientId: string = msg.clientId || currentClientId;
         if (clientId) {
           currentClientId = clientId;
+        }
+
+        // 0. APP-LEVEL KEEP-ALIVE
+        // The browser answers protocol pings automatically, but this lightweight
+        // round-trip lets the client detect half-open sockets and keeps a
+        // free-tier instance from spinning down while a player waits in the lobby.
+        if (msg.type === 'ping') {
+          sendJson(ws, { type: 'pong' });
+          return;
         }
 
         // 1. LIST ROOMS
@@ -464,6 +481,7 @@ async function startServer() {
             trickHistory: [],
             roundSummaryRaw: null,
             resolveTimer: null,
+            lastActivityAt: Date.now(),
           };
 
           rooms.set(roomCode, newRoom);
@@ -613,6 +631,7 @@ async function startServer() {
               trickHistory: [],
               roundSummaryRaw: null,
               resolveTimer: null,
+              lastActivityAt: Date.now(),
             };
 
             rooms.set(roomCode, newRoom);
@@ -1176,6 +1195,56 @@ async function startServer() {
       }
     });
   });
+
+  // Heartbeat: keeps connections alive through proxies and reaps half-open
+  // "zombie" sockets (a phone that switched networks leaves one behind).
+  const heartbeatInterval = setInterval(() => {
+    for (const client of wss.clients) {
+      const socket = client as WebSocket & { isAlive?: boolean };
+      if (socket.isAlive === false) {
+        socket.terminate();
+        continue;
+      }
+      socket.isAlive = false;
+      try {
+        socket.ping();
+      } catch {
+        // Socket already gone; the close handler cleans up.
+      }
+    }
+  }, 30000);
+  wss.on('close', () => clearInterval(heartbeatInterval));
+
+  // Housekeeping: abandoned tables and dead queue entries would otherwise pile
+  // up for the whole life of the instance (rooms live in memory).
+  const ABANDONED_ROOM_TTL_MS = 5 * 60 * 1000;
+  const housekeepingInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of rooms) {
+      const seats = room.seats.filter(Boolean) as SeatState[];
+      if (seats.length === 0) {
+        rooms.delete(code);
+        continue;
+      }
+      const everyoneGone = seats.every((s) => !s.connected);
+      if (!everyoneGone) continue;
+
+      const abandoned =
+        room.status === 'WAITING' ||
+        now - (room.lastActivityAt || 0) > ABANDONED_ROOM_TTL_MS;
+      if (!abandoned) continue;
+
+      if (room.resolveTimer) clearTimeout(room.resolveTimer);
+      rooms.delete(code);
+      seats.forEach((s) => clientRoomMap.delete(s.clientId));
+    }
+
+    for (let i = matchmakingQueue.length - 1; i >= 0; i--) {
+      if (matchmakingQueue[i].ws.readyState !== WebSocket.OPEN) {
+        matchmakingQueue.splice(i, 1);
+      }
+    }
+  }, 60000);
 
   // Vite middleware in development, static dist in production
   if (process.env.NODE_ENV !== 'production') {
