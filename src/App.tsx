@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import {
   Volume2,
   VolumeX,
@@ -59,6 +59,7 @@ import {
   ParticleCanvasHandle,
 } from './components/ParticleCanvas';
 import { soundFx } from './utils/soundFx';
+import { prefersReducedMotion } from './utils/motionPreferences';
 
 const HERO_DEMO_CARDS: Card[] = [
   { id: 'A_espadas', suit: 'espadas', rank: 'A', points: 11, strength: 10 },
@@ -202,7 +203,7 @@ export default function App() {
   });
 
   // UI Overlays
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => soundFx.isMuted());
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] =
     useState<boolean>(false);
@@ -234,6 +235,8 @@ export default function App() {
   const resolveTimerRef = useRef<number | null>(null);
   const sweepTimerRef = useRef<number | null>(null);
   const bigMomentTimerRef = useRef<number | null>(null);
+  const pauseDialogRef = useRef<HTMLDivElement | null>(null);
+  const summaryDialogRef = useRef<HTMLDivElement | null>(null);
 
   const playerCharacter = getCharacterProfile(playerCharacterId);
   const activeOpponent = getCharacterProfile(opponentId);
@@ -289,6 +292,8 @@ export default function App() {
   }, [clearTimers]);
 
   const triggerTableShake = useCallback((intensity: 'light' | 'heavy') => {
+    // Movimento reduzido: pulsa o tremor de tela (efeito puramente visual).
+    if (prefersReducedMotion()) return;
     setTableShakeMode(intensity);
     window.setTimeout(
       () => setTableShakeMode('none'),
@@ -298,6 +303,9 @@ export default function App() {
 
   const triggerScreenFlash = useCallback(
     (color: 'gold' | 'emerald' | 'crimson') => {
+      // Movimento reduzido: pulsa o flash de tela (o banner de evento ainda
+      // comunica o mesmo acontecimento em texto).
+      if (prefersReducedMotion()) return;
       setScreenFlash(color);
       window.setTimeout(() => setScreenFlash('none'), 380);
     },
@@ -2008,6 +2016,16 @@ export default function App() {
     startNewRound,
   ]);
 
+  // Foco ao abrir os modais: leitores de tela e navegação por teclado
+  // começam dentro do diálogo em vez de no tabuleiro atrás dele.
+  useEffect(() => {
+    if (gameState === 'PAUSED') {
+      pauseDialogRef.current?.focus();
+    } else if (gameState === 'ROUND_SUMMARY' || gameState === 'GAME_OVER') {
+      summaryDialogRef.current?.focus();
+    }
+  }, [gameState]);
+
   // Computed live telemetry values
   const playerCurrentPoints =
     matchMode === 'VS_ONLINE'
@@ -2044,6 +2062,7 @@ export default function App() {
       : '';
 
   return (
+    <MotionConfig reducedMotion="user">
     <div
       className={`relative w-screen h-[100dvh] overflow-hidden baize-surface select-none flex flex-col justify-between ${shakeClass}`}
     >
@@ -3442,11 +3461,18 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="pause-title"
+          onClick={() => {
+            soundFx.playButtonTap();
+            setGameState('PLAYING');
+          }}
         >
           <motion.div
+            ref={pauseDialogRef}
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-md rounded-2xl walnut-rail border border-[#FBBF24]/40 p-6 sm:p-7 text-center shadow-2xl space-y-5"
+            className="w-full max-w-md rounded-2xl walnut-rail border border-[#FBBF24]/40 p-6 sm:p-7 text-center shadow-2xl space-y-5 outline-none"
           >
             <div>
               <p className="text-xs text-[#FBBF24] uppercase tracking-widest">
@@ -3525,8 +3551,24 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="summary-title"
+            onClick={() => {
+              // Clique no backdrop avança a rodada (atalho do Enter).
+              // No GAME_OVER fica inerte para evitar avanço acidental.
+              if (gameState !== 'ROUND_SUMMARY') return;
+              soundFx.playButtonTap();
+              if (matchMode === 'VS_ONLINE') {
+                sendWsMessage({ type: 'online:next_round' });
+              } else {
+                const nextLeader: TurnOwner =
+                  roundSummary?.winner === 'bot' ? 'bot' : 'player';
+                startNewRound(gameMode, nextLeader, false, roundNumber + 1);
+              }
+            }}
           >
             <motion.div
+              ref={summaryDialogRef}
+              tabIndex={-1}
+              onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.82, opacity: 0, y: 24 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               transition={{
@@ -3534,7 +3576,7 @@ export default function App() {
                 stiffness: 320,
                 damping: 22,
               }}
-              className="w-full max-w-lg rounded-2xl walnut-rail border-2 border-[#FBBF24]/60 p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] space-y-6"
+              className="w-full max-w-lg rounded-2xl walnut-rail border-2 border-[#FBBF24]/60 p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] space-y-6 outline-none"
             >
               <div className="text-center">
                 <motion.div
@@ -3697,5 +3739,6 @@ export default function App() {
       {/* Rules, Impeto & Imperial Powers Modal */}
       <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
     </div>
+    </MotionConfig>
   );
 }

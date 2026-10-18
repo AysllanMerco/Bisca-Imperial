@@ -2,6 +2,24 @@ class SoundFxEngine {
   private ctx: AudioContext | null = null;
   private muted: boolean = false;
 
+  constructor() {
+    // Restaura a preferência de silêncio salva pelo usuário (localStorage).
+    // Sem try/catch o acesso em iframe sandboxed lançaria exceção no boot.
+    try {
+      this.muted = localStorage.getItem('bisca_imperial_muted') === '1';
+    } catch {
+      this.muted = false;
+    }
+  }
+
+  private persistMute(): void {
+    try {
+      localStorage.setItem('bisca_imperial_muted', this.muted ? '1' : '0');
+    } catch {
+      // Ignora erros de storage em ambientes sandboxed
+    }
+  }
+
   private getContext(): AudioContext | null {
     if (this.muted) return null;
     if (!this.ctx && typeof window !== 'undefined') {
@@ -25,10 +43,12 @@ class SoundFxEngine {
 
   public setMuted(mute: boolean): void {
     this.muted = mute;
+    this.persistMute();
   }
 
   public toggleMute(): boolean {
     this.muted = !this.muted;
+    this.persistMute();
     if (!this.muted) {
       this.playButtonTap();
     }

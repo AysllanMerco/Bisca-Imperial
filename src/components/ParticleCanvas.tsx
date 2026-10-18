@@ -4,6 +4,7 @@ import React, {
   useRef,
   forwardRef,
 } from 'react';
+import { prefersReducedMotion } from '../utils/motionPreferences';
 
 export interface ParticleBurstOptions {
   x?: number;
@@ -271,15 +272,19 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
 
   useImperativeHandle(ref, () => ({
     emitBurst(options?: ParticleBurstOptions) {
+      if (prefersReducedMotion()) return;
       spawnBurstInternal(options);
     },
     emitShockwave(options?: ShockwaveOptions) {
+      if (prefersReducedMotion()) return;
       spawnShockwaveInternal(options);
     },
     emitTrumpSlash(x?: number, y?: number) {
+      if (prefersReducedMotion()) return;
       spawnTrumpSlashInternal(x, y);
     },
     triggerCelebration(intensity: 'normal' | 'grand' = 'normal') {
+      if (prefersReducedMotion()) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -325,6 +330,13 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
     };
     handleResize();
     window.addEventListener('resize', handleResize);
+
+    // Movimento reduzido: mantém apenas o redimensionamento do canvas.
+    // As poeiras douradas ambientais e todos os efeitos são desligados para
+    // respeitar a preferência de acessibilidade do sistema.
+    if (prefersReducedMotion()) {
+      return () => window.removeEventListener('resize', handleResize);
+    }
 
     // Ambient tavern gold dust motes
     const motes: DustMote[] = Array.from({ length: DUST_COUNT }, () => ({
