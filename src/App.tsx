@@ -2851,6 +2851,20 @@ export default function App() {
                   })}
                 </AnimatePresence>
               </div>
+
+              {/* Opponent Speech Bubble (below his cards, top of screen) */}
+              {matchMode === 'VS_BOT' && botStatusText && (
+                <motion.div
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  className="mt-2 pointer-events-none flex items-center justify-center"
+                >
+                  <div className="max-w-[230px] rounded-xl bg-[#D97706]/92 border border-[#FBBF24]/65 px-3 py-1.5 text-xs sm:text-sm font-bold text-[#1B0E07] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
+                    {botStatusText}
+                  </div>
+                </motion.div>
+              )}
             </div>
 
             {/* Right Cluster: Utility Controls */}
@@ -3098,21 +3112,11 @@ export default function App() {
                   </div>
                 ) : currentTrick.length === 0 ? (
                   <div className="text-center pointer-events-none px-4">
-                    <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
-                      {turnOwner === 'player'
-                        ? `Sua vez de puxar a vaza, ${displayUsername}`
-                        : matchMode === 'VS_ONLINE'
-                        ? `Aguardando jogada de ${opponentShortName}...`
-                        : botStatusText ||
-                          `${opponentShortName} inicia a vaza...`}
-                    </div>
-                    <div className="text-xs text-[#D6C7B2]/65 mt-1">
-                      {turnOwner === 'player'
-                        ? coercedPlayer === 'player'
-                          ? 'Grito do Ipiranga ativo: você deve jogar sua carta de maior pontuação!'
-                          : 'Clique em uma carta ou pressione 1–9 (ou P para Poder em 100 PI)'
-                        : 'Aguarde o lance na mesa'}
-                    </div>
+                    {matchMode === 'VS_ONLINE' && turnOwner !== 'player' ? (
+                      <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
+                        Aguardando jogada de {opponentShortName}...
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <AnimatePresence>
@@ -3377,6 +3381,29 @@ export default function App() {
                 </span>
               </button>
             </div>
+
+            {/* Player Turn Cue (above your hand, bottom of screen) */}
+            {gameState === 'PLAYING' && turnOwner === 'player' && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                className="mb-2 pointer-events-none flex items-center justify-center"
+              >
+                <div className="max-w-[280px] rounded-xl bg-[#064E3B]/92 border border-[#FBBF24]/55 px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#FBF7EE] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
+                  {currentTrick.length === 0
+                    ? coercedPlayer === 'player'
+                      ? 'Grito do Ipiranga: jogue sua carta de maior pontuação!'
+                      : `Sua vez de puxar a vaza, ${displayUsername}`
+                    : 'Sua vez de responder a vaza!'}
+                  <div className="text-[10px] text-[#D6C7B2]/70 mt-0.5 font-sans">
+                    {currentTrick.length === 0 && coercedPlayer !== 'player'
+                      ? 'Clique em uma carta ou pressione 1–9 (P para Poder)'
+                      : 'Escolha uma carta da sua mão'}
+                  </div>
+                </div>
+              </motion.div>
+            )}
 
             {/* Player Fanned Interactive Cards */}
             <div
