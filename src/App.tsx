@@ -3704,6 +3704,9 @@ export default function App() {
                     <span className="hidden sm:inline text-[11px] text-[#D6C7B2]">
                       ({playerCharacter.shortName})
                     </span>
+                    <span className="font-mono-num text-[10px] sm:text-xs font-bold text-[#6EE7B7] whitespace-nowrap rounded-md bg-[#064E3B]/60 border border-[#34D399]/40 px-1.5 py-0.5">
+                      {playerCurrentPoints} pts
+                    </span>
                   </div>
                   <div className="text-[9px] sm:text-[10px] text-[#34D399] font-mono-num whitespace-nowrap max-w-[84px] sm:max-w-none truncate">
                     Poder: {playerCharacter.power.name}
@@ -3711,9 +3714,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Barra de Força (Ímpeto 0 a 100 PI) */}
-              <div className="flex items-center gap-2 sm:gap-2.5">
-                <div className="w-16 sm:w-44 h-2.5 rounded-full bg-black/65 border border-[#FBBF24]/30 overflow-hidden p-0.5">
+              {/* Barra de Força (Ímpeto 0 a 100 PI) + porcentagem sempre visível.
+                  No mobile a barra some (dá lugar aos pontos), mas a % permanece. */}
+              <div className="flex items-center gap-1.5 sm:gap-2.5">
+                <div className="hidden sm:block w-44 h-2.5 rounded-full bg-black/65 border border-[#FBBF24]/30 overflow-hidden p-0.5">
                   <motion.div
                     initial={false}
                     animate={{ width: `${playerImpeto}%` }}
@@ -3725,7 +3729,7 @@ export default function App() {
                     }`}
                   />
                 </div>
-                <span className="hidden sm:inline font-mono-num text-[11px] sm:text-xs font-bold text-[#FBBF24] whitespace-nowrap">
+                <span className="font-mono-num text-[10px] sm:text-xs font-bold text-[#FBBF24] whitespace-nowrap">
                   {playerImpeto}/100 PI
                 </span>
               </div>
