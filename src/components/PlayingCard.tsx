@@ -11,6 +11,7 @@ interface PlayingCardProps {
   hotkeyLabel?: string;
   size?: 'sm' | 'md' | 'lg';
   onClick?: () => void;
+  onMouseEnter?: () => void;
   className?: string;
 }
 
@@ -62,6 +63,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
   hotkeyLabel,
   size = 'md',
   onClick,
+  onMouseEnter,
   className = '',
 }) => {
   const dimensions = {
@@ -175,6 +177,9 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
     <Wrapper
       type={onClick ? 'button' : undefined}
       onClick={onClick && isPlayable ? onClick : undefined}
+      onMouseEnter={
+        onMouseEnter && isPlayable && !faceDown ? onMouseEnter : undefined
+      }
       disabled={onClick ? !isPlayable : undefined}
       aria-label={`${getCardDisplayName(card)}${card.points > 0 ? `, vale ${card.points} pontos` : ''}${isTrumpSuit ? ', carta de Trunfo' : ''}`}
       className={`group relative select-none text-left transition-all duration-150 ease-out ${dimensions} bg-[#FBF7EE] shadow-[0_10px_24px_rgba(0,0,0,0.55)] border ${borderClasses} ${highValueGlowClass} ${interactiveClasses} ${className}`}

@@ -1,5 +1,6 @@
 import {
   ActiveTrickModifiers,
+  BotMood,
   Card,
   CharacterId,
   ImpetoChargeResult,
@@ -8,6 +9,7 @@ import {
   Rank,
   RoundSummaryData,
   Suit,
+  TauntSpec,
   TurnOwner,
 } from '../types/bisca';
 
@@ -86,6 +88,8 @@ export const OPPONENTS: OpponentProfile[] = [
     quoteTrumpCut: '"Pelo meu sangue e pelo Trunfo, corto esta vaza!"',
     quotePowerActivate:
       '"Às margens desta mesa: ordeno que jogue sua maior carta agora!"',
+    quoteTauntResponse:
+      '"Sangue imperial não treme com vento de salão! Prossiga!"',
   },
   {
     id: 'leopoldina',
@@ -111,6 +115,8 @@ export const OPPONENTS: OpponentProfile[] = [
     quoteTrumpCut: '"Assino o decreto com este corte de Trunfo!"',
     quotePowerActivate:
       '"Por Decreto Soberano da Regência, os pontos desta vaza valem em dobro!"',
+    quoteTauntResponse:
+      '"Palavras altas raramente mascaram boas jogadas, viajante."',
   },
   {
     id: 'isabel',
@@ -136,6 +142,8 @@ export const OPPONENTS: OpponentProfile[] = [
     quoteTrumpCut: '"Pela Lei Áurea da mesa, este Trunfo decide a rodada!"',
     quotePowerActivate:
       '"Pela Redenção Dourada, resgato a joia mais valiosa que havia sido perdida!"',
+    quoteTauntResponse:
+      '"A serenidade da corte responde melhor do que o alarido, senhor."',
   },
   {
     id: 'bonifacio',
@@ -161,6 +169,8 @@ export const OPPONENTS: OpponentProfile[] = [
     quoteTrumpCut: '"Intervenção cirúrgica do Gabinete com carta de Trunfo!"',
     quotePowerActivate:
       '"Reorganizo o Estado: tomo o Trunfo da mesa e instituo uma nova ordem!"',
+    quoteTauntResponse:
+      '"Conheço a matemática do baralho, moço. Blefe não altera probabilidade."',
   },
   {
     id: 'pedro_ii',
@@ -188,12 +198,45 @@ export const OPPONENTS: OpponentProfile[] = [
       '"Sob o selo do Segundo Reinado, aplico o Trunfo no momento exato."',
     quotePowerActivate:
       '"Convoco o Gabinete de Conciliação: nenhuma carta permanece oculta aos olhos do Império!"',
+    quoteTauntResponse:
+      '"A aritmética das vazas me é conhecida por inteiro, honrado oponente."',
   },
 ];
 
 export function getCharacterProfile(id: CharacterId): OpponentProfile {
   return OPPONENTS.find((c) => c.id === id) || OPPONENTS[0];
 }
+
+/** As 4 provocações rápidas do jogador (atalhos F1–F4, cooldown de 8s). */
+export const TAUNTS: TauntSpec[] = [
+  {
+    id: 'elogio',
+    label: 'Elogio Irônico',
+    phrase: 'Bela cartada, Vossa Graça!',
+    iconName: 'sparkles',
+  },
+  {
+    id: 'coroa',
+    label: 'Intimidação Real',
+    phrase: 'Esta carga pertence à Coroa!',
+    iconName: 'crown',
+  },
+  {
+    id: 'trunfo_bluff',
+    label: 'Blefe de Trunfo',
+    phrase: 'Tremei diante do meu Trunfo!',
+    iconName: 'swords',
+  },
+  {
+    id: 'pressa',
+    label: 'Pressão de Tempo',
+    phrase: 'O Império não espera por indecisos!',
+    iconName: 'hourglass',
+  },
+];
+
+/** Cooldown compartilhado entre provocações, em segundos. */
+export const TAUNT_COOLDOWN_SECONDS = 8;
 
 export function getRankName(rank: Rank): string {
   const found = RANK_CONFIG.find((r) => r.rank === rank);
@@ -454,6 +497,14 @@ export function calculateImpetoCharge(
 
 /**
  * Tactical AI Decision Engine for Imperial Brazil Personalities
+ *
+ * `botMood` reflects the psychological effect of a player taunt on the current
+ * trick ("vaza"):
+ * - PROVOKED (Dom Pedro I, 45% on 'coroa'/'trunfo_bluff'): impulsive — burns a
+ *   trump or a high card even when the trick is worth nothing.
+ * - CAUTIOUS (Leopoldina/Isabel, 35% on 'trunfo_bluff'): hoards Aces/7s and
+ *   refuses to play 10/11-point cards, suspecting an ambush.
+ * - Bonifácio & Dom Pedro II are immune to bluffs (never receive a mood).
  */
 export function chooseBotCard(
   botHand: Card[],
@@ -463,9 +514,10 @@ export function chooseBotCard(
   mustFollowSuitInEndgame: boolean,
   opponentId: OpponentId,
   playedCardsHistory: Card[],
-  isCoercedByGrito: boolean = false
+  isCoercedByGrito: boolean = false,
+  botMood: BotMood = 'NORMAL'
 ): Card {
-  const validCards = botHand.filter((c) =>
+  let validCards = botHand.filter((c) =>
     isCardPlayable(
       c,
       botHand,
@@ -484,8 +536,48 @@ export function chooseBotCard(
     return validCards[0];
   }
 
+  // CAUTIOUS: never spend an Ace (11) or Bisca (10) while suspicious — keep
+  // every other legal card in play until the ambush reveals itself.
+  if (
+    botMood === 'CAUTIOUS' &&
+    (opponentId === 'leopoldina' || opponentId === 'isabel')
+  ) {
+    const carefulCards = validCards.filter((c) => c.points < 10);
+    if (carefulCards.length > 0) {
+      validCards = carefulCards;
+    }
+  }
+
   // 1. Dom Pedro I: Impetuous, aggressive
   if (opponentId === 'pedro_i') {
+    // PROVOKED: the taunt worked — he cuts with trump or slams a high card
+    // even when the lead is worth zero points.
+    if (botMood === 'PROVOKED') {
+      if (!leadCard) {
+        const bosses = validCards.filter(
+          (c) => c.rank === 'A' || c.rank === '7'
+        );
+        if (bosses.length > 0) {
+          return bosses.sort((a, b) => b.points - a.points)[0];
+        }
+        return [...validCards].sort(
+          (a, b) => b.points - a.points || b.strength - a.strength
+        )[0];
+      }
+      const furiousCuts = validCards.filter(
+        (c) =>
+          c.suit === trumpSuit &&
+          leadCard.suit !== trumpSuit &&
+          evaluateTrick(leadCard, c, 'player', trumpSuit).winner === 'bot'
+      );
+      if (furiousCuts.length > 0) {
+        return furiousCuts.sort((a, b) => b.strength - a.strength)[0];
+      }
+      return [...validCards].sort(
+        (a, b) => b.points - a.points || b.strength - a.strength
+      )[0];
+    }
+
     if (!leadCard) {
       const nonTrumps = validCards.filter((c) => c.suit !== trumpSuit);
       const courtOrLow = nonTrumps.filter((c) => c.points <= 4);
