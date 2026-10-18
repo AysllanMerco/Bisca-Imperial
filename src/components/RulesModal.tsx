@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, Zap, ShieldCheck } from 'lucide-react';
 import { OPPONENTS, RANK_CONFIG } from '../utils/biscaEngine';
 import { OpponentAvatar } from './OpponentAvatar';
@@ -9,6 +9,16 @@ interface RulesModalProps {
 }
 
 export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  // Leva o foco para o diálogo ao abrir, para que leitores de tela e
+  // navegação por teclado comecem dentro do modal em vez do jogo atrás dele.
+  useEffect(() => {
+    if (isOpen) {
+      dialogRef.current?.focus();
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const scoringRanks = [...RANK_CONFIG].reverse();
@@ -19,8 +29,14 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
       role="dialog"
       aria-modal="true"
       aria-labelledby="rules-modal-title"
+      onClick={onClose}
     >
-      <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl walnut-rail border border-[#FBBF24]/45 p-6 sm:p-8 text-[#FBF7EE] shadow-2xl">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl walnut-rail border border-[#FBBF24]/45 p-6 sm:p-8 text-[#FBF7EE] shadow-2xl outline-none"
+      >
         <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
           <div>
             <p className="text-xs font-sans text-[#FBBF24] tracking-wide">

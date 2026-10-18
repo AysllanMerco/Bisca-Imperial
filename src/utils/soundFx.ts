@@ -2,6 +2,24 @@ class SoundFxEngine {
   private ctx: AudioContext | null = null;
   private muted: boolean = false;
 
+  constructor() {
+    // Restaura a preferência de silêncio salva pelo usuário (localStorage).
+    // Sem try/catch o acesso em iframe sandboxed lançaria exceção no boot.
+    try {
+      this.muted = localStorage.getItem('bisca_imperial_muted') === '1';
+    } catch {
+      this.muted = false;
+    }
+  }
+
+  private persistMute(): void {
+    try {
+      localStorage.setItem('bisca_imperial_muted', this.muted ? '1' : '0');
+    } catch {
+      // Ignora erros de storage em ambientes sandboxed
+    }
+  }
+
   private getContext(): AudioContext | null {
     if (this.muted) return null;
     if (!this.ctx && typeof window !== 'undefined') {
@@ -25,10 +43,12 @@ class SoundFxEngine {
 
   public setMuted(mute: boolean): void {
     this.muted = mute;
+    this.persistMute();
   }
 
   public toggleMute(): boolean {
     this.muted = !this.muted;
+    this.persistMute();
     if (!this.muted) {
       this.playButtonTap();
     }
@@ -308,6 +328,152 @@ class SoundFxEngine {
       gain.connect(ctx.destination);
       osc.start(start);
       osc.stop(start + 0.4);
+    });
+  }
+
+  /**
+   * Royal seal/chime played when a speech bubble (provocação) pops on the
+   * table: two staggered tones form a small chord — a parchment bell for the
+   * player, a slightly lower one for the Bot.
+   */
+  public playTauntBubble(isPlayer: boolean = true): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const base = isPlayer ? 659.25 : 523.25;
+    const chord = [base, base * 1.25];
+
+    chord.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const start = now + idx * 0.07;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, start);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.1, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.22);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.24);
+    });
+
+    // Subtle parchment rustle under the chime
+    const bufferSize = Math.floor(ctx.sampleRate * 0.05);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 2.2);
+    }
+    const noise = ctx.createBufferSource();
+    noise.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2100, now);
+    filter.Q.value = 1.2;
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.045, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noise.start(now);
+  }
+
+  /**
+   * Deep, extremely soft 60–90Hz pulse (low-passed) for the endgame phase
+   * (empty stock): hover tension on a playable card without being annoying.
+   */
+  public playEndgameHeartbeat(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(90, now);
+    osc.frequency.exponentialRampToValueAtTime(60, now + 0.22);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(160, now);
+    filter.Q.value = 0.7;
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.32);
+  }
+
+  /**
+   * Heavy wooden impact + low metallic ring, played when a trump cuts an
+   * Ace/Bisca ("carta cravada") or an Imperial Overtrump lands.
+   */
+  public playCravadaImpact(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+
+    // Heavy wood slam (deep sine drop)
+    const thud = ctx.createOscillator();
+    const thudGain = ctx.createGain();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(155, now);
+    thud.frequency.exponentialRampToValueAtTime(34, now + 0.17);
+    thudGain.gain.setValueAtTime(0.34, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+    thud.connect(thudGain);
+    thudGain.connect(ctx.destination);
+    thud.start(now);
+    thud.stop(now + 0.2);
+
+    // Wood crack transient (filtered noise burst)
+    const crackSize = Math.floor(ctx.sampleRate * 0.08);
+    const crackBuffer = ctx.createBuffer(1, crackSize, ctx.sampleRate);
+    const crackData = crackBuffer.getChannelData(0);
+    for (let i = 0; i < crackSize; i++) {
+      crackData[i] =
+        (Math.random() * 2 - 1) * Math.pow(1 - i / crackSize, 1.6);
+    }
+    const crack = ctx.createBufferSource();
+    crack.buffer = crackBuffer;
+    const crackFilter = ctx.createBiquadFilter();
+    crackFilter.type = 'lowpass';
+    crackFilter.frequency.setValueAtTime(1100, now);
+    const crackGain = ctx.createGain();
+    crackGain.gain.setValueAtTime(0.2, now);
+    crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    crack.connect(crackFilter);
+    crackFilter.connect(crackGain);
+    crackGain.connect(ctx.destination);
+    crack.start(now);
+
+    // Low metallic ring (two detuned triangles, slow decay)
+    const ringFreqs = [196, 294];
+    ringFreqs.forEach((freq, idx) => {
+      const ring = ctx.createOscillator();
+      const ringGain = ctx.createGain();
+      const start = now + 0.02 + idx * 0.015;
+      ring.type = 'triangle';
+      ring.frequency.setValueAtTime(freq, start);
+      ringGain.gain.setValueAtTime(0.0001, start);
+      ringGain.gain.exponentialRampToValueAtTime(0.12, start + 0.012);
+      ringGain.gain.exponentialRampToValueAtTime(0.001, start + 0.55);
+      ring.connect(ringGain);
+      ringGain.connect(ctx.destination);
+      ring.start(start);
+      ring.stop(start + 0.57);
     });
   }
 

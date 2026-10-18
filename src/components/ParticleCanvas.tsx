@@ -4,6 +4,7 @@ import React, {
   useRef,
   forwardRef,
 } from 'react';
+import { prefersReducedMotion } from '../utils/motionPreferences';
 
 export interface ParticleBurstOptions {
   x?: number;
@@ -25,6 +26,8 @@ export interface ParticleCanvasHandle {
   emitBurst: (options?: ParticleBurstOptions) => void;
   emitShockwave: (options?: ShockwaveOptions) => void;
   emitTrumpSlash: (x?: number, y?: number) => void;
+  /** Golden imperial seal scar left where a "carta cravada" landed (1.5s fade). */
+  emitCravadaSeal: (x?: number, y?: number) => void;
   triggerCelebration: (intensity?: 'normal' | 'grand') => void;
 }
 
@@ -78,10 +81,21 @@ interface DustMote {
   phase: number;
 }
 
+interface SealEffect {
+  active: boolean;
+  x: number;
+  y: number;
+  life: number;
+  maxLife: number;
+  rotation: number;
+}
+
 const POOL_SIZE = 280;
 const RING_POOL_SIZE = 20;
 const SLASH_POOL_SIZE = 8;
+const SEAL_POOL_SIZE = 4;
 const DUST_COUNT = 32;
+const SEAL_LIFE_SECONDS = 1.5;
 
 const SUIT_CHARS = ['♠', '♥', '♦', '♣'];
 
@@ -98,6 +112,7 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
   const poolRef = useRef<Particle[]>([]);
   const ringPoolRef = useRef<ShockwaveRing[]>([]);
   const slashPoolRef = useRef<SlashEffect[]>([]);
+  const sealPoolRef = useRef<SealEffect[]>([]);
   const celebrationTimersRef = useRef<number[]>([]);
 
   // Initialize fixed object pools once
@@ -149,6 +164,19 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
         life: 0,
         maxLife: 0.42,
         color: '#FBBF24',
+      });
+    }
+  }
+
+  if (sealPoolRef.current.length === 0) {
+    for (let i = 0; i < SEAL_POOL_SIZE; i++) {
+      sealPoolRef.current.push({
+        active: false,
+        x: 0,
+        y: 0,
+        life: 0,
+        maxLife: SEAL_LIFE_SECONDS,
+        rotation: -0.14,
       });
     }
   }
@@ -269,17 +297,53 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
     });
   };
 
+  const spawnCravadaSealInternal = (x?: number, y?: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const cx = x ?? canvas.width * 0.5;
+    const cy = y ?? canvas.height * 0.48;
+
+    const pool = sealPoolRef.current;
+    for (let i = 0; i < pool.length; i++) {
+      const s = pool[i];
+      if (!s.active) {
+        s.active = true;
+        s.x = cx;
+        s.y = cy;
+        s.life = 0;
+        s.maxLife = SEAL_LIFE_SECONDS;
+        s.rotation = -0.16 + (Math.random() - 0.5) * 0.1;
+        return;
+      }
+    }
+    // Pool exhausted: recycle the oldest seal so the mark never gets lost.
+    const oldest = pool.reduce((a, b) => (a.life >= b.life ? a : b));
+    oldest.active = true;
+    oldest.x = cx;
+    oldest.y = cy;
+    oldest.life = 0;
+    oldest.maxLife = SEAL_LIFE_SECONDS;
+    oldest.rotation = -0.16 + (Math.random() - 0.5) * 0.1;
+  };
+
   useImperativeHandle(ref, () => ({
     emitBurst(options?: ParticleBurstOptions) {
+      if (prefersReducedMotion()) return;
       spawnBurstInternal(options);
     },
     emitShockwave(options?: ShockwaveOptions) {
+      if (prefersReducedMotion()) return;
       spawnShockwaveInternal(options);
     },
     emitTrumpSlash(x?: number, y?: number) {
+      if (prefersReducedMotion()) return;
       spawnTrumpSlashInternal(x, y);
     },
+    emitCravadaSeal(x?: number, y?: number) {
+      spawnCravadaSealInternal(x, y);
+    },
     triggerCelebration(intensity: 'normal' | 'grand' = 'normal') {
+      if (prefersReducedMotion()) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -326,6 +390,13 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
     handleResize();
     window.addEventListener('resize', handleResize);
 
+    // Movimento reduzido: mantém apenas o redimensionamento do canvas.
+    // As poeiras douradas ambientais e todos os efeitos são desligados para
+    // respeitar a preferência de acessibilidade do sistema.
+    if (prefersReducedMotion()) {
+      return () => window.removeEventListener('resize', handleResize);
+    }
+
     // Ambient tavern gold dust motes
     const motes: DustMote[] = Array.from({ length: DUST_COUNT }, () => ({
       x: Math.random() * window.innerWidth,
@@ -352,6 +423,8 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
       for (let i = 0; i < rings.length; i++) if (rings[i].active) return true;
       const slashes = slashPoolRef.current;
       for (let i = 0; i < slashes.length; i++) if (slashes[i].active) return true;
+      const seals = sealPoolRef.current;
+      for (let i = 0; i < seals.length; i++) if (seals[i].active) return true;
       return false;
     };
 
@@ -453,6 +526,86 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
         ctx.moveTo(-currentLen * 0.42, 0);
         ctx.quadraticCurveTo(0, -5 * (1 - t), currentLen * 0.42, 0);
         ctx.quadraticCurveTo(0, 5 * (1 - t), -currentLen * 0.42, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      // 3b. Update & render Golden "Carta Cravada" seal scar (fades over 1.5s)
+      const seals = sealPoolRef.current;
+      for (let i = 0; i < seals.length; i++) {
+        const s = seals[i];
+        if (!s.active) continue;
+        s.life += dt;
+        if (s.life >= s.maxLife) {
+          s.active = false;
+          continue;
+        }
+        const t = s.life / s.maxLife;
+        // Snaps in hard on impact, then breathes and dissolves.
+        const settle = Math.min(1, t * 6);
+        const scale = 1.32 - 0.32 * (1 - Math.pow(1 - settle, 3));
+        const alpha =
+          t < 0.08 ? t / 0.08 : Math.max(0, 1 - Math.pow((t - 0.08) / 0.92, 1.6));
+
+        ctx.save();
+        ctx.translate(s.x, s.y);
+        ctx.rotate(s.rotation);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
+        ctx.shadowColor = '#FBBF24';
+        ctx.shadowBlur = 26;
+
+        // Outer seal ring
+        ctx.strokeStyle = '#FBBF24';
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 46, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Inner dashed ring
+        ctx.shadowBlur = 8;
+        ctx.strokeStyle = '#FEF08A';
+        ctx.lineWidth = 1.6;
+        ctx.setLineDash([7, 6]);
+        ctx.beginPath();
+        ctx.arc(0, 0, 36, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Crossed imperial swords
+        ctx.shadowBlur = 14;
+        ctx.strokeStyle = '#FDE68A';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        [-0.72, 0.72].forEach((angle) => {
+          ctx.save();
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.moveTo(0, -30);
+          ctx.lineTo(0, 24);
+          ctx.stroke();
+          // Crossguard
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-8, 18);
+          ctx.lineTo(8, 18);
+          ctx.stroke();
+          ctx.restore();
+        });
+
+        // Central imperial crown point
+        ctx.shadowBlur = 18;
+        ctx.fillStyle = '#FFF7D6';
+        ctx.beginPath();
+        ctx.moveTo(0, -12);
+        ctx.lineTo(7, -2);
+        ctx.lineTo(2, -2);
+        ctx.lineTo(2, 8);
+        ctx.lineTo(-2, 8);
+        ctx.lineTo(-2, -2);
+        ctx.lineTo(-7, -2);
         ctx.closePath();
         ctx.fill();
 

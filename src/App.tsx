@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import {
   Volume2,
   VolumeX,
@@ -19,8 +19,11 @@ import {
   User,
   Globe,
   Bot,
+  Hourglass,
+  Shield,
 } from 'lucide-react';
 import {
+  BotMood,
   Card,
   CharacterId,
   GameMode,
@@ -33,12 +36,15 @@ import {
   PowerSelectionMode,
   RoundSummaryData,
   Suit,
+  TauntSpec,
   TrickHistoryItem,
   TurnOwner,
 } from './types/bisca';
 import {
   OPPONENTS,
   SUIT_INFO,
+  TAUNTS,
+  TAUNT_COOLDOWN_SECONDS,
   calculateImpetoCharge,
   canSwapTwoOfTrump,
   chooseBotCard,
@@ -59,6 +65,7 @@ import {
   ParticleCanvasHandle,
 } from './components/ParticleCanvas';
 import { soundFx } from './utils/soundFx';
+import { prefersReducedMotion } from './utils/motionPreferences';
 
 const HERO_DEMO_CARDS: Card[] = [
   { id: 'A_espadas', suit: 'espadas', rank: 'A', points: 11, strength: 10 },
@@ -69,6 +76,17 @@ const HERO_DEMO_CARDS: Card[] = [
 ];
 
 const MATCH_TARGET_TENTOS = 4;
+
+/** Icon map for the quick-taunt bar (F1–F4). */
+const TAUNT_ICONS: Record<
+  string,
+  React.ComponentType<{ className?: string }>
+> = {
+  sparkles: Sparkles,
+  crown: Crown,
+  swords: Swords,
+  hourglass: Hourglass,
+};
 
 interface BigMomentCallout {
   id: number;
@@ -202,7 +220,7 @@ export default function App() {
   });
 
   // UI Overlays
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => soundFx.isMuted());
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] =
     useState<boolean>(false);
@@ -210,6 +228,18 @@ export default function App() {
     null
   );
   const [heroSelectedCardIdx, setHeroSelectedCardIdx] = useState<number>(1);
+
+  // Psicologia de Mesa: provocações (emotes), balões de fala e humor da IA
+  const [tauntCooldownLeft, setTauntCooldownLeft] = useState<number>(0);
+  const [playerBubble, setPlayerBubble] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
+  const [botBubble, setBotBubble] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
+  const [botMood, setBotMood] = useState<BotMood>('NORMAL');
 
   // Refs for timers, WebSocket & particles
   const particleRef = useRef<ParticleCanvasHandle | null>(null);
@@ -234,6 +264,14 @@ export default function App() {
   const resolveTimerRef = useRef<number | null>(null);
   const sweepTimerRef = useRef<number | null>(null);
   const bigMomentTimerRef = useRef<number | null>(null);
+  const pauseDialogRef = useRef<HTMLDivElement | null>(null);
+  const summaryDialogRef = useRef<HTMLDivElement | null>(null);
+  const playerBubbleTimerRef = useRef<number | null>(null);
+  const botBubbleTimerRef = useRef<number | null>(null);
+  const botResponseTimerRef = useRef<number | null>(null);
+  // Throttles the endgame hover heartbeat so sweeping across the hand does not
+  // machine-gun the 60–90Hz pulse.
+  const lastHeartbeatAtRef = useRef<number>(0);
 
   const playerCharacter = getCharacterProfile(playerCharacterId);
   const activeOpponent = getCharacterProfile(opponentId);
@@ -282,6 +320,21 @@ export default function App() {
       window.clearTimeout(bigMomentTimerRef.current);
       bigMomentTimerRef.current = null;
     }
+    if (playerBubbleTimerRef.current) {
+      window.clearTimeout(playerBubbleTimerRef.current);
+      playerBubbleTimerRef.current = null;
+    }
+    if (botBubbleTimerRef.current) {
+      window.clearTimeout(botBubbleTimerRef.current);
+      botBubbleTimerRef.current = null;
+    }
+    if (botResponseTimerRef.current) {
+      window.clearTimeout(botResponseTimerRef.current);
+      botResponseTimerRef.current = null;
+    }
+    setPlayerBubble(null);
+    setBotBubble(null);
+    setBotMood('NORMAL');
   }, []);
 
   useEffect(() => {
@@ -289,6 +342,8 @@ export default function App() {
   }, [clearTimers]);
 
   const triggerTableShake = useCallback((intensity: 'light' | 'heavy') => {
+    // Movimento reduzido: pulsa o tremor de tela (efeito puramente visual).
+    if (prefersReducedMotion()) return;
     setTableShakeMode(intensity);
     window.setTimeout(
       () => setTableShakeMode('none'),
@@ -298,6 +353,9 @@ export default function App() {
 
   const triggerScreenFlash = useCallback(
     (color: 'gold' | 'emerald' | 'crimson') => {
+      // Movimento reduzido: pulsa o flash de tela (o banner de evento ainda
+      // comunica o mesmo acontecimento em texto).
+      if (prefersReducedMotion()) return;
       setScreenFlash(color);
       window.setTimeout(() => setScreenFlash('none'), 380);
     },
@@ -340,6 +398,96 @@ export default function App() {
     },
     [triggerTableShake, trumpSuit]
   );
+
+  // =========================================================================
+  // PSICOLOGIA DE MESA: PROVOCAÇÕES DO JOGADOR, RESPOSTA DA IA E HUMOR
+  // =========================================================================
+  // Ticks the shared 8s taunt cooldown down toward zero.
+  useEffect(() => {
+    if (tauntCooldownLeft <= 0) return;
+    const timer = window.setTimeout(() => {
+      setTauntCooldownLeft((prev) => Math.max(0, +(prev - 0.25).toFixed(2)));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [tauntCooldownLeft]);
+
+  const sendTaunt = useCallback(
+    (taunt: TauntSpec) => {
+      if (gameState !== 'PLAYING' || tauntCooldownLeft > 0) return;
+      setTauntCooldownLeft(TAUNT_COOLDOWN_SECONDS);
+
+      setPlayerBubble({
+        id: Date.now() + Math.random(),
+        text: taunt.phrase,
+      });
+      soundFx.playTauntBubble(true);
+      if (playerBubbleTimerRef.current) {
+        window.clearTimeout(playerBubbleTimerRef.current);
+      }
+      playerBubbleTimerRef.current = window.setTimeout(() => {
+        setPlayerBubble(null);
+      }, 3200);
+
+      // The Bot only exists in VS_BOT matches; online opponents never see or
+      // answer local emotes (the WS protocol has no taunt channel).
+      if (matchMode !== 'VS_BOT') return;
+
+      // Psychological roll for THIS trick:
+      // - Dom Pedro I: 45% to snap ('coroa' / 'trunfo_bluff') → PROVOKED.
+      // - Leopoldina & Isabel: 35% to grow suspicious of the trump bluff →
+      //   CAUTIOUS.
+      // - Bonifácio & Dom Pedro II: immune calculators (never a mood change).
+      let nextMood: BotMood = 'NORMAL';
+      if (
+        opponentId === 'pedro_i' &&
+        (taunt.id === 'trunfo_bluff' || taunt.id === 'coroa')
+      ) {
+        nextMood = Math.random() < 0.45 ? 'PROVOKED' : 'NORMAL';
+      } else if (
+        (opponentId === 'leopoldina' || opponentId === 'isabel') &&
+        taunt.id === 'trunfo_bluff'
+      ) {
+        nextMood = Math.random() < 0.35 ? 'CAUTIOUS' : 'NORMAL';
+      }
+      if (nextMood !== 'NORMAL') {
+        setBotMood(nextMood);
+      }
+
+      if (botResponseTimerRef.current) {
+        window.clearTimeout(botResponseTimerRef.current);
+      }
+      botResponseTimerRef.current = window.setTimeout(() => {
+        setBotBubble({
+          id: Date.now() + Math.random(),
+          text: activeOpponent.quoteTauntResponse,
+        });
+        soundFx.playTauntBubble(false);
+        if (botBubbleTimerRef.current) {
+          window.clearTimeout(botBubbleTimerRef.current);
+        }
+        botBubbleTimerRef.current = window.setTimeout(() => {
+          setBotBubble(null);
+        }, 3200);
+      }, 1050);
+    },
+    [
+      activeOpponent.quoteTauntResponse,
+      gameState,
+      matchMode,
+      opponentId,
+      tauntCooldownLeft,
+    ]
+  );
+
+  // Endgame tension: hovering a playable card once the stock is empty plays a
+  // deep, soft heartbeat pulse (throttled so fast sweeps stay subtle).
+  const handleEndgameHandHover = useCallback(() => {
+    if (stock.length > 0) return;
+    const now = Date.now();
+    if (now - lastHeartbeatAtRef.current < 700) return;
+    lastHeartbeatAtRef.current = now;
+    soundFx.playEndgameHeartbeat();
+  }, [stock.length]);
 
   // =========================================================================
   // REAL-TIME WEBSOCKET CONNECTION & STATE SYNC (VS_ONLINE)
@@ -1215,12 +1363,29 @@ export default function App() {
       const capturedEnemyBiscaOrAce =
         loserCard.rank === '7' || loserCard.rank === 'A';
 
+      // "Carta Cravada": trump cut over an Ace/Bisca, or an Imperial Overtrump
+      // (the +50 PI event) — gets the heavy impact sound and the golden seal
+      // scar left on the baize.
+      const isCravada =
+        (secondPlay.card.suit === trumpSuit &&
+          firstPlay.card.suit !== trumpSuit &&
+          (firstPlay.card.rank === 'A' || firstPlay.card.rank === '7')) ||
+        impetoResult.playerDelta === 50 ||
+        impetoResult.botDelta === 50;
+
       if (isTrumpCut || isOvertrump) {
         soundFx.playTrumpSlash();
         particleRef.current?.emitTrumpSlash(
           window.innerWidth * 0.5,
           window.innerHeight * 0.46
         );
+        if (isCravada) {
+          soundFx.playCravadaImpact();
+          particleRef.current?.emitCravadaSeal(
+            window.innerWidth * 0.5,
+            window.innerHeight * 0.46
+          );
+        }
       }
 
       if (impetoResult.playerDelta === 50 || impetoResult.botDelta === 50) {
@@ -1817,8 +1982,15 @@ export default function App() {
         mustFollowSuitInEndgame,
         opponentId,
         playedCardsHistory,
-        isBotCoerced
+        isBotCoerced,
+        botMood
       );
+
+      // The provoked/cautious mood shapes exactly this card, then expires
+      // ("naquela vaza").
+      if (botMood !== 'NORMAL') {
+        setBotMood('NORMAL');
+      }
 
       if (isBotCoerced) {
         setCoercedPlayer(null);
@@ -1867,6 +2039,7 @@ export default function App() {
     botCaptured,
     botHand,
     botImpeto,
+    botMood,
     coercedPlayer,
     currentTrick,
     finalizeTrick,
@@ -1950,6 +2123,22 @@ export default function App() {
           setIsHistoryDrawerOpen((prev) => !prev);
           return;
         }
+        // Provocações rápidas: F1–F4 (compartilham o cooldown de 8s)
+        const tauntIndex =
+          e.key === 'F1'
+            ? 0
+            : e.key === 'F2'
+            ? 1
+            : e.key === 'F3'
+            ? 2
+            : e.key === 'F4'
+            ? 3
+            : -1;
+        if (tauntIndex >= 0 && tauntIndex < TAUNTS.length) {
+          e.preventDefault();
+          sendTaunt(TAUNTS[tauntIndex]);
+          return;
+        }
         const num = parseInt(e.key, 10);
         if (num >= 1 && num <= 9 && num <= playerHand.length) {
           handlePlayPlayerCard(playerHand[num - 1]);
@@ -2004,9 +2193,20 @@ export default function App() {
     powerSelectionMode,
     roundNumber,
     roundSummary?.winner,
+    sendTaunt,
     sendWsMessage,
     startNewRound,
   ]);
+
+  // Foco ao abrir os modais: leitores de tela e navegação por teclado
+  // começam dentro do diálogo em vez de no tabuleiro atrás dele.
+  useEffect(() => {
+    if (gameState === 'PAUSED') {
+      pauseDialogRef.current?.focus();
+    } else if (gameState === 'ROUND_SUMMARY' || gameState === 'GAME_OVER') {
+      summaryDialogRef.current?.focus();
+    }
+  }, [gameState]);
 
   // Computed live telemetry values
   const playerCurrentPoints =
@@ -2023,6 +2223,23 @@ export default function App() {
   const currentTrickPoints =
     currentTrick.reduce((sum, item) => sum + item.card.points, 0) *
     trickPointMultiplier;
+  // "Carta Cravada": the trick's 2nd card is a trump cutting an Ace (11) or
+  // Bisca (7), or an Imperial Overtrump (+50 PI). Drives the aggressive slam
+  // animation + overlap of the winning card over the defeated one.
+  const cravadaSecondPlay: boolean = (() => {
+    if (currentTrick.length !== 2) return false;
+    const lead = currentTrick[0].card;
+    const resp = currentTrick[1].card;
+    if (resp.suit === trumpSuit && lead.suit !== trumpSuit) {
+      return lead.rank === 'A' || lead.rank === '7';
+    }
+    return (
+      lead.suit === trumpSuit &&
+      resp.suit === trumpSuit &&
+      resp.strength > lead.strength &&
+      (lead.points >= 2 || resp.points >= 2)
+    );
+  })();
   const playerCanSwapTrump =
     turnOwner === 'player' &&
     currentTrick.length === 0 &&
@@ -2044,6 +2261,7 @@ export default function App() {
       : '';
 
   return (
+    <MotionConfig reducedMotion="user">
     <div
       className={`relative w-screen h-[100dvh] overflow-hidden baize-surface select-none flex flex-col justify-between ${shakeClass}`}
     >
@@ -2069,6 +2287,19 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Reta Final (stock esgotado): vinhetas escuras âmbar/carmesim pulsantes
+          focando o olhar no centro da mesa */}
+      {gameState === 'PLAYING' && stock.length === 0 && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-20 animate-endgame-vignette"
+          style={{
+            background:
+              'radial-gradient(ellipse at center, transparent 38%, rgba(127,29,29,0.3) 70%, rgba(18,7,3,0.85) 100%)',
+          }}
+        />
+      )}
 
       {/* Ornate Jacarandá & Imperial Brass Perimeter Frame Trim */}
       <div className="pointer-events-none fixed inset-0 border-[10px] sm:border-[14px] border-[#27150B] shadow-[inset_0_0_60px_rgba(0,0,0,0.85)] z-20" />
@@ -2749,11 +2980,53 @@ export default function App() {
 
             {/* Center Opponent Zone (Avatar + Opponent Impeto Bar + Fanned Hand) */}
             <div className="pointer-events-auto order-3 w-full sm:order-none sm:w-auto flex flex-col items-center">
-              <div className="walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-md w-full sm:w-auto max-w-md">
+              <div className="relative walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-md w-full sm:w-auto max-w-md">
+                {/* Balão de fala da provocação respondida pela IA */}
+                <AnimatePresence>
+                  {botBubble && (
+                    <motion.div
+                      key={botBubble.id}
+                      initial={{ opacity: 0, y: -10, scale: 0.8 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.85 }}
+                      transition={{ type: 'spring', stiffness: 430, damping: 22 }}
+                      className="pointer-events-none absolute bottom-full left-0 mb-2 z-40 w-max max-w-[min(78vw,260px)] walnut-rail border-2 border-[#FBBF24] rounded-xl px-3 py-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.8)]"
+                    >
+                      <p className="text-[11px] sm:text-xs font-semibold text-[#FBF7EE] leading-snug">
+                        {botBubble.text}
+                      </p>
+                      <span className="absolute left-4 -bottom-[6px] w-2.5 h-2.5 rotate-45 bg-[#27150B] border-r-2 border-b-2 border-[#FBBF24]" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <OpponentAvatar
                   opponentId={opponentId}
                   className="w-7 h-7 sm:w-9 sm:h-9"
                 />
+                {botMood !== 'NORMAL' && matchMode === 'VS_BOT' && (
+                  <motion.span
+                    initial={{ opacity: 0, scale: 0.4, rotate: -25 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.4 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 18 }}
+                    title={
+                      botMood === 'PROVOKED'
+                        ? 'Caiu na provocação!'
+                        : 'Desconfiado do blefe...'
+                    }
+                    className={`shrink-0 flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-lg border ${
+                      botMood === 'PROVOKED'
+                        ? 'bg-[#7F1D1D]/80 border-[#F87171] text-[#FCA5A5]'
+                        : 'bg-black/60 border-[#FBBF24]/70 text-[#FBBF24]'
+                    }`}
+                  >
+                    {botMood === 'PROVOKED' ? (
+                      <Flame className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-pulse" />
+                    ) : (
+                      <Shield className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    )}
+                  </motion.span>
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2 sm:gap-3">
                     <span className="font-display font-bold text-[11px] sm:text-sm text-[#FBF7EE] truncate flex items-center gap-1 sm:gap-1.5">
@@ -3054,6 +3327,20 @@ export default function App() {
                 )}
               </AnimatePresence>
 
+              {/* Opponent Speech Bubble — center of screen, above the cards we play */}
+              {matchMode === 'VS_BOT' && botStatusText && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="mb-2 flex items-center justify-center pointer-events-none z-20"
+                >
+                  <div className="max-w-[320px] rounded-2xl bg-[#D97706]/94 border border-[#FBBF24]/70 px-3.5 py-2 text-sm sm:text-base font-bold text-[#1B0E07] shadow-2xl drop-shadow-[0_0_24px_rgba(0,0,0,0.6)] text-center whitespace-pre-line">
+                    {botStatusText}
+                  </div>
+                </motion.div>
+              )}
+
               {/* Center Baize Inscribed Imperial Ring */}
               <div
                 className={`relative w-[290px] h-[134px] sm:w-[380px] sm:h-[235px] rounded-3xl border transition-colors duration-300 flex items-center justify-center gap-4 sm:gap-8 px-3 sm:px-4 shadow-inner ${
@@ -3062,6 +3349,10 @@ export default function App() {
                     : 'border-[#FBBF24]/20 bg-black/15'
                 }`}
               >
+                {/* Reta final (sem monte): pulso dourado suave no anel da vaza */}
+                {gameState === 'PLAYING' && stock.length === 0 && (
+                  <div className="pointer-events-none absolute inset-0 rounded-3xl border-2 border-transparent animate-ring-tension" />
+                )}
                 {powerSelectionMode !== 'NONE' ? (
                   <div className="text-center px-4">
                     <div className="font-display font-bold text-base sm:text-lg text-[#FEF08A]">
@@ -3079,21 +3370,11 @@ export default function App() {
                   </div>
                 ) : currentTrick.length === 0 ? (
                   <div className="text-center pointer-events-none px-4">
-                    <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
-                      {turnOwner === 'player'
-                        ? `Sua vez de puxar a vaza, ${displayUsername}`
-                        : matchMode === 'VS_ONLINE'
-                        ? `Aguardando jogada de ${opponentShortName}...`
-                        : botStatusText ||
-                          `${opponentShortName} inicia a vaza...`}
-                    </div>
-                    <div className="text-xs text-[#D6C7B2]/65 mt-1">
-                      {turnOwner === 'player'
-                        ? coercedPlayer === 'player'
-                          ? 'Grito do Ipiranga ativo: você deve jogar sua carta de maior pontuação!'
-                          : 'Clique em uma carta ou pressione 1–9 (ou P para Poder em 100 PI)'
-                        : 'Aguarde o lance na mesa'}
-                    </div>
+                    {matchMode === 'VS_ONLINE' && turnOwner !== 'player' ? (
+                      <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
+                        Aguardando jogada de {opponentShortName}...
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <AnimatePresence>
@@ -3109,25 +3390,41 @@ export default function App() {
                           : 0;
                       const entryFromY =
                         played.playedBy === 'player' ? 120 : -120;
+                      // "Carta Cravada": a resposta que corta Ás/Bisca ou
+                      // trunfa imperialmente desce de muito mais alto, gira
+                      // com força e sobrepoe a carta derrotada.
+                      const isCravadaStrike = idx === 1 && cravadaSecondPlay;
 
                       return (
                         <motion.div
                           key={`${played.card.id}_${idx}`}
                           initial={{
                             opacity: 0,
-                            y: entryFromY,
-                            scale: 1.28,
-                            rotate: played.playedBy === 'player' ? -8 : 8,
+                            y: isCravadaStrike
+                              ? entryFromY * 1.85
+                              : entryFromY,
+                            scale: isCravadaStrike ? 1.55 : 1.28,
+                            rotate: isCravadaStrike
+                              ? -22
+                              : played.playedBy === 'player'
+                              ? -8
+                              : 8,
                           }}
                           animate={{
                             opacity: trickCollectingTo ? 0.15 : 1,
                             y: sweepTargetY,
                             scale: trickCollectingTo
                               ? 0.65
+                              : isCravadaStrike
+                              ? 1.08
                               : isWinning
                               ? 1.07
                               : 1,
-                            rotate: idx === 0 ? -3 : 4,
+                            rotate: isCravadaStrike
+                              ? -12
+                              : idx === 0
+                              ? -3
+                              : 4,
                           }}
                           exit={{ opacity: 0, scale: 0.5 }}
                           transition={{
@@ -3135,7 +3432,11 @@ export default function App() {
                             stiffness: 390,
                             damping: 24,
                           }}
-                          className="flex flex-col items-center"
+                          className={`flex flex-col items-center ${
+                            isCravadaStrike
+                              ? 'relative z-20 -ml-8 sm:-ml-12'
+                              : ''
+                          }`}
                         >
                           <span className="mb-1.5 text-[11px] font-semibold text-[#E7DEC8]">
                             {played.playedBy === 'player'
@@ -3292,8 +3593,29 @@ export default function App() {
               BOTTOM ZONE: PLAYER PROFILE, BARRA DE ÍMPETO (0-100 PI) & HAND
           ================================================================= */}
           <div className="flex flex-col items-center justify-end pb-1">
+            {/* Painel do jogador + Barra de Provocações (lado a lado em telas largas,
+                empilhando de forma compacta no mobile) */}
+            <div className="mb-1.5 sm:mb-2.5 flex w-full flex-wrap items-center justify-center gap-1.5 sm:gap-3">
             {/* Player Character + Barra de Força (Ímpeto 0-100 PI) + Power Button */}
-            <div className="mb-1.5 sm:mb-2.5 w-full max-w-md sm:w-auto sm:max-w-none walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-4 sm:py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 sm:gap-4 shadow-lg">
+            <div className="relative w-full max-w-md sm:w-auto sm:max-w-none walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-4 sm:py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 sm:gap-4 shadow-lg">
+              {/* Balão de fala da provocação do jogador */}
+              <AnimatePresence>
+                {playerBubble && (
+                  <motion.div
+                    key={playerBubble.id}
+                    initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.85 }}
+                    transition={{ type: 'spring', stiffness: 430, damping: 22 }}
+                    className="pointer-events-none absolute bottom-full left-1/2 mb-2 z-40 w-max max-w-[min(78vw,260px)] walnut-rail border-2 border-[#FBBF24] rounded-xl px-3 py-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.8)]"
+                  >
+                    <p className="text-[11px] sm:text-xs font-semibold text-[#FBF7EE] leading-snug">
+                      {playerBubble.text}
+                    </p>
+                    <span className="absolute left-1/2 -bottom-[6px] -ml-[5px] w-2.5 h-2.5 rotate-45 bg-[#27150B] border-r-2 border-b-2 border-[#FBBF24]" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {/* Player Identity */}
               <div className="flex items-center gap-2 sm:gap-2.5">
                 <OpponentAvatar
@@ -3359,6 +3681,72 @@ export default function App() {
               </button>
             </div>
 
+            {/* Barra de Provocações Rápidas (F1–F4, cooldown global de 8s) */}
+            <div
+              className="flex items-center justify-center gap-1 sm:gap-1.5 rounded-xl walnut-rail border border-[#FBBF24]/30 px-1.5 py-1 shadow-md"
+              role="group"
+              aria-label="Provocações rápidas"
+            >
+              {TAUNTS.map((taunt, index) => {
+                const Icon = TAUNT_ICONS[taunt.iconName];
+                const isOnCooldown = tauntCooldownLeft > 0;
+                return (
+                  <button
+                    key={taunt.id}
+                    type="button"
+                    disabled={isOnCooldown}
+                    onClick={() => sendTaunt(taunt)}
+                    title={`${taunt.label} [F${index + 1}] — "${taunt.phrase}"${
+                      isOnCooldown
+                        ? ` · recarga ${tauntCooldownLeft.toFixed(1)}s`
+                        : ''
+                    }`}
+                    className={`relative px-1.5 sm:px-2.5 py-1 rounded-lg border text-[10px] sm:text-xs font-display font-bold flex items-center gap-1 transition-all whitespace-nowrap ${
+                      isOnCooldown
+                        ? 'border-white/10 text-[#D6C7B2]/40 cursor-not-allowed opacity-60'
+                        : 'border-[#FBBF24]/45 text-[#FBBF24] hover:border-[#FBBF24] hover:bg-[#F59E0B]/20 hover:-translate-y-0.5 cursor-pointer'
+                    }`}
+                  >
+                    {Icon && (
+                      <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                    )}
+                    <span className="font-mono-num text-[9px] opacity-70">
+                      F{index + 1}
+                    </span>
+                    {isOnCooldown && (
+                      <span className="absolute inset-0 rounded-lg bg-black/55 flex items-center justify-center font-mono-num text-[10px] font-bold text-[#FBBF24]">
+                        {tauntCooldownLeft.toFixed(0)}s
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            </div>
+
+            {/* Player Turn Cue (above your hand, bottom of screen) */}
+            {gameState === 'PLAYING' && turnOwner === 'player' && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                className="mb-2 pointer-events-none flex items-center justify-center"
+              >
+                <div className="max-w-[280px] rounded-xl bg-[#064E3B]/92 border border-[#FBBF24]/55 px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#FBF7EE] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
+                  {currentTrick.length === 0
+                    ? coercedPlayer === 'player'
+                      ? 'Grito do Ipiranga: jogue sua carta de maior pontuação!'
+                      : `Sua vez de puxar a vaza, ${displayUsername}`
+                    : 'Sua vez de responder a vaza!'}
+                  <div className="text-[10px] text-[#D6C7B2]/70 mt-0.5 font-sans">
+                    {currentTrick.length === 0 && coercedPlayer !== 'player'
+                      ? 'Clique em uma carta ou pressione 1–9 (P para Poder)'
+                      : 'Escolha uma carta da sua mão'}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {/* Player Fanned Interactive Cards */}
             <div
               className="flex items-center justify-center pb-2 sm:pb-1 max-w-full"
@@ -3423,6 +3811,7 @@ export default function App() {
                         isPlayable={canPlay}
                         hotkeyLabel={String(idx + 1)}
                         onClick={() => handlePlayPlayerCard(card)}
+                        onMouseEnter={handleEndgameHandHover}
                       />
                     </motion.div>
                   );
@@ -3442,11 +3831,18 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="pause-title"
+          onClick={() => {
+            soundFx.playButtonTap();
+            setGameState('PLAYING');
+          }}
         >
           <motion.div
+            ref={pauseDialogRef}
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-md rounded-2xl walnut-rail border border-[#FBBF24]/40 p-6 sm:p-7 text-center shadow-2xl space-y-5"
+            className="w-full max-w-md rounded-2xl walnut-rail border border-[#FBBF24]/40 p-6 sm:p-7 text-center shadow-2xl space-y-5 outline-none"
           >
             <div>
               <p className="text-xs text-[#FBBF24] uppercase tracking-widest">
@@ -3525,8 +3921,24 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="summary-title"
+            onClick={() => {
+              // Clique no backdrop avança a rodada (atalho do Enter).
+              // No GAME_OVER fica inerte para evitar avanço acidental.
+              if (gameState !== 'ROUND_SUMMARY') return;
+              soundFx.playButtonTap();
+              if (matchMode === 'VS_ONLINE') {
+                sendWsMessage({ type: 'online:next_round' });
+              } else {
+                const nextLeader: TurnOwner =
+                  roundSummary?.winner === 'bot' ? 'bot' : 'player';
+                startNewRound(gameMode, nextLeader, false, roundNumber + 1);
+              }
+            }}
           >
             <motion.div
+              ref={summaryDialogRef}
+              tabIndex={-1}
+              onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.82, opacity: 0, y: 24 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               transition={{
@@ -3534,7 +3946,7 @@ export default function App() {
                 stiffness: 320,
                 damping: 22,
               }}
-              className="w-full max-w-lg rounded-2xl walnut-rail border-2 border-[#FBBF24]/60 p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] space-y-6"
+              className="w-full max-w-lg rounded-2xl walnut-rail border-2 border-[#FBBF24]/60 p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] space-y-6 outline-none"
             >
               <div className="text-center">
                 <motion.div
@@ -3697,5 +4109,6 @@ export default function App() {
       {/* Rules, Impeto & Imperial Powers Modal */}
       <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
     </div>
+    </MotionConfig>
   );
 }
