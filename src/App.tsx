@@ -239,6 +239,11 @@ export default function App() {
     id: number;
     text: string;
   } | null>(null);
+  // Fala do adversário humano (VS_ONLINE), recebida pelo canal WS de provocações.
+  const [onlineOpponentBubble, setOnlineOpponentBubble] = useState<{
+    id: number;
+    text: string;
+  } | null>(null);
   const [botMood, setBotMood] = useState<BotMood>('NORMAL');
 
   // Refs for timers, WebSocket & particles
@@ -269,6 +274,7 @@ export default function App() {
   const playerBubbleTimerRef = useRef<number | null>(null);
   const botBubbleTimerRef = useRef<number | null>(null);
   const botResponseTimerRef = useRef<number | null>(null);
+  const onlineOpponentBubbleTimerRef = useRef<number | null>(null);
   // Throttles the endgame hover heartbeat so sweeping across the hand does not
   // machine-gun the 60–90Hz pulse.
   const lastHeartbeatAtRef = useRef<number>(0);
@@ -332,8 +338,13 @@ export default function App() {
       window.clearTimeout(botResponseTimerRef.current);
       botResponseTimerRef.current = null;
     }
+    if (onlineOpponentBubbleTimerRef.current) {
+      window.clearTimeout(onlineOpponentBubbleTimerRef.current);
+      onlineOpponentBubbleTimerRef.current = null;
+    }
     setPlayerBubble(null);
     setBotBubble(null);
+    setOnlineOpponentBubble(null);
     setBotMood('NORMAL');
   }, []);
 
@@ -428,8 +439,23 @@ export default function App() {
         setPlayerBubble(null);
       }, 3200);
 
-      // The Bot only exists in VS_BOT matches; online opponents never see or
-      // answer local emotes (the WS protocol has no taunt channel).
+      // VS_ONLINE: transmite a provocação pelo canal WS para que o adversário
+      // humano veja o balão no centro da mesa dele(a) também.
+      if (matchMode === 'VS_ONLINE') {
+        const socket = wsRef.current;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: 'online:taunt',
+              text: taunt.phrase,
+              clientId,
+            })
+          );
+        }
+        return;
+      }
+
+      // The Bot only exists in VS_BOT matches.
       if (matchMode !== 'VS_BOT') return;
 
       // Psychological roll for THIS trick:
@@ -472,6 +498,7 @@ export default function App() {
     },
     [
       activeOpponent.quoteTauntResponse,
+      clientId,
       gameState,
       matchMode,
       opponentId,
@@ -597,6 +624,27 @@ export default function App() {
 
           // Keep-alive reply: nothing to render.
           if (msg.type === 'pong') {
+            return;
+          }
+
+          // Provocação do adversário humano: renderiza o balão no centro da mesa.
+          // Ignora o eco da própria mensagem (o servidor deve retransmitir apenas
+          // ao oponente, mas defendemos contra o eco por clientId).
+          if (msg.type === 'online:taunt') {
+            if (msg.clientId && msg.clientId === clientId) {
+              return;
+            }
+            const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+            if (text) {
+              setOnlineOpponentBubble({ id: Date.now() + Math.random(), text });
+              soundFx.playTauntBubble(false);
+              if (onlineOpponentBubbleTimerRef.current) {
+                window.clearTimeout(onlineOpponentBubbleTimerRef.current);
+              }
+              onlineOpponentBubbleTimerRef.current = window.setTimeout(() => {
+                setOnlineOpponentBubble(null);
+              }, 3200);
+            }
             return;
           }
 
@@ -2981,24 +3029,6 @@ export default function App() {
             {/* Center Opponent Zone (Avatar + Opponent Impeto Bar + Fanned Hand) */}
             <div className="pointer-events-auto order-3 w-full sm:order-none sm:w-auto flex flex-col items-center">
               <div className="relative walnut-rail rounded-xl border border-[#FBBF24]/35 px-2 py-1 sm:px-3.5 sm:py-2 flex items-center gap-2 sm:gap-3 shadow-md w-full sm:w-auto max-w-md">
-                {/* Balão de fala da provocação respondida pela IA */}
-                <AnimatePresence>
-                  {botBubble && (
-                    <motion.div
-                      key={botBubble.id}
-                      initial={{ opacity: 0, y: -10, scale: 0.8 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.85 }}
-                      transition={{ type: 'spring', stiffness: 430, damping: 22 }}
-                      className="pointer-events-none absolute bottom-full left-0 mb-2 z-40 w-max max-w-[min(78vw,260px)] walnut-rail border-2 border-[#FBBF24] rounded-xl px-3 py-1.5 shadow-[0_12px_30px_rgba(0,0,0,0.8)]"
-                    >
-                      <p className="text-[11px] sm:text-xs font-semibold text-[#FBF7EE] leading-snug">
-                        {botBubble.text}
-                      </p>
-                      <span className="absolute left-4 -bottom-[6px] w-2.5 h-2.5 rotate-45 bg-[#27150B] border-r-2 border-b-2 border-[#FBBF24]" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
                 <OpponentAvatar
                   opponentId={opponentId}
                   className="w-7 h-7 sm:w-9 sm:h-9"
@@ -3327,19 +3357,46 @@ export default function App() {
                 )}
               </AnimatePresence>
 
-              {/* Opponent Speech Bubble — center of screen, above the cards we play */}
-              {matchMode === 'VS_BOT' && botStatusText && (
-                <motion.div
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  className="mb-2 flex items-center justify-center pointer-events-none z-20"
-                >
-                  <div className="max-w-[320px] rounded-2xl bg-[#D97706]/94 border border-[#FBBF24]/70 px-3.5 py-2 text-sm sm:text-base font-bold text-[#1B0E07] shadow-2xl drop-shadow-[0_0_24px_rgba(0,0,0,0.6)] text-center whitespace-pre-line">
-                    {botStatusText}
-                  </div>
-                </motion.div>
-              )}
+              {/* Balão de fala do adversário — centro da mesa, acima da arena de cartas */}
+              <AnimatePresence mode="wait">
+                {(botBubble || onlineOpponentBubble || (matchMode === 'VS_BOT' && botStatusText)) && (
+                  <motion.div
+                    key={
+                      botBubble
+                        ? `bubble-${botBubble.id}`
+                        : onlineOpponentBubble
+                        ? `online-${onlineOpponentBubble.id}`
+                        : `status-${botStatusText}`
+                    }
+                    initial={{ opacity: 0, y: -8, scale: 0.92 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.92 }}
+                    transition={{ type: 'spring', stiffness: 430, damping: 24 }}
+                    className="mb-2 flex w-full items-center justify-center pointer-events-none z-30 px-2"
+                  >
+                    <div
+                      className={`relative max-w-[min(92vw,380px)] rounded-2xl px-3.5 py-2 text-sm sm:text-base font-bold text-center whitespace-pre-line leading-snug shadow-2xl drop-shadow-[0_0_24px_rgba(0,0,0,0.6)] ${
+                        botBubble || onlineOpponentBubble
+                          ? 'walnut-rail border-2 border-[#FBBF24] text-[#FBF7EE]'
+                          : 'bg-[#D97706]/94 border border-[#FBBF24]/70 text-[#1B0E07]'
+                      }`}
+                    >
+                      {botBubble
+                        ? botBubble.text
+                        : onlineOpponentBubble
+                        ? onlineOpponentBubble.text
+                        : botStatusText}
+                      <span
+                        className={`absolute left-1/2 -translate-x-1/2 -bottom-[6px] w-2.5 h-2.5 rotate-45 border-r-2 border-b-2 border-[#FBBF24] ${
+                          botBubble || onlineOpponentBubble
+                            ? 'bg-[#27150B]'
+                            : 'bg-[#D97706]'
+                        }`}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* Center Baize Inscribed Imperial Ring */}
               <div
@@ -3369,12 +3426,29 @@ export default function App() {
                     </p>
                   </div>
                 ) : currentTrick.length === 0 ? (
-                  <div className="text-center pointer-events-none px-4">
+                  <div className="text-center pointer-events-none px-3 sm:px-4">
                     {matchMode === 'VS_ONLINE' && turnOwner !== 'player' ? (
                       <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
                         Aguardando jogada de {opponentShortName}...
                       </div>
-                    ) : null}
+                    ) : turnOwner === 'player' ? (
+                      <>
+                        <div className="font-display font-bold text-sm sm:text-base text-[#FEF08A] drop-shadow-[0_0_12px_rgba(0,0,0,0.55)]">
+                          {coercedPlayer === 'player'
+                            ? 'Grito do Ipiranga: jogue sua carta de maior pontuação!'
+                            : `Sua vez de puxar a vaza, ${displayUsername}`}
+                        </div>
+                        <p className="text-xs text-[#D6C7B2]/80 mt-1">
+                          {coercedPlayer === 'player'
+                            ? 'Escolha uma carta da sua mão'
+                            : 'Clique em uma carta ou pressione 1–9 (P para Poder)'}
+                        </p>
+                      </>
+                    ) : (
+                      <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
+                        Aguardando o lance na mesa...
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <AnimatePresence>
@@ -3723,29 +3797,6 @@ export default function App() {
               })}
             </div>
             </div>
-
-            {/* Player Turn Cue (above your hand, bottom of screen) */}
-            {gameState === 'PLAYING' && turnOwner === 'player' && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="mb-2 pointer-events-none flex items-center justify-center"
-              >
-                <div className="max-w-[280px] rounded-xl bg-[#064E3B]/92 border border-[#FBBF24]/55 px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#FBF7EE] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
-                  {currentTrick.length === 0
-                    ? coercedPlayer === 'player'
-                      ? 'Grito do Ipiranga: jogue sua carta de maior pontuação!'
-                      : `Sua vez de puxar a vaza, ${displayUsername}`
-                    : 'Sua vez de responder a vaza!'}
-                  <div className="text-[10px] text-[#D6C7B2]/70 mt-0.5 font-sans">
-                    {currentTrick.length === 0 && coercedPlayer !== 'player'
-                      ? 'Clique em uma carta ou pressione 1–9 (P para Poder)'
-                      : 'Escolha uma carta da sua mão'}
-                  </div>
-                </div>
-              </motion.div>
-            )}
 
             {/* Player Fanned Interactive Cards */}
             <div
