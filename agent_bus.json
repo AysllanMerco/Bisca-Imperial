@@ -1,0 +1,306 @@
+{
+  "bus_version": 1,
+  "updated_at": "2026-10-18T12:30:00-03:00",
+  "_readme": "Barramento de comunicacao entre sessoes de agentes do projeto Bisca Imperial. Regras: (1) cada sessao escreve SOMENTE na sua propria chave ('backend' = Sessao 1, 'frontend' = Sessao 2); (2) nunca apague chaves de terceiros - releia o arquivo e faca merge antes de gravar; (3) formato UTF-8 (o arquivo original era UTF-16 e foi convertido); (4) ao aceitar/alterar um contrato, marque em <sessao>.contract_ack com data e versao.",
+  "backend": {
+    "agent": "Sessao 1 - Backend (regras de negocio + WebSocket autoritativo)",
+    "workdir": "C:\\Users\\aysll\\Bisca-Imperial",
+    "branch": "feature/agente-backend",
+    "updated_at": "2026-10-18T15:10:00-03:00",
+    "contract_version": "1.2",
+    "summary": "Servidor Express + WebSocket em server.ts. E a UNICA autoridade das regras online: em VS_ONLINE nenhum calculo de regra acontece no cliente. As salas vivem em memoria; toda acao e validada no servidor e a cada mutacao relevante ele envia um snapshot COMPLETO (OnlineSyncedState) aos DOIS jogadores via 'room:state'. As regras puras ficam em src/utils/biscaEngine.ts (compartilhado com o modo local) e os tipos do contrato em src/types/bisca.ts (presente nas duas branches).",
+    "connection": {
+      "transport": "WebSocket (JSON por mensagem)",
+      "endpoint": "/ws-bisca no mesmo processo Node (mesmo host que serve o front). VITE_WS_URL aponta para ca quando o front esta em outro host.",
+      "auth": "Nenhuma credencial. Identidade = campo 'clientId' presente em TODA mensagem client->server. O socket e associado a (clientId + cadeira).",
+      "keepalive": "Servidor responde {type:'pong'} a {type:'ping'}. Heartbeat de protocolo a cada 30s (estoura sockets zumbis).",
+      "reconnect": "Servidor nao inicia reconexao. O cliente reenvia 'room:join' com o mesmo clientId e o servidor religa a MESMA cadeira (idempotente) e reenvia room:state."
+    },
+    "resilience": {
+      "grace_period_ms": 300000,
+      "grace_period_human": "5 minutos",
+      "behavior": "Mesa sobrevive a queda de socket por ate 5 min, em QUALQUER status (WAITING e PLAYING). Dentro da janela, 'room:join' com o mesmo clientId retoma a cadeira e o estado exato (mesma mao, monte, vez, tentos). Apos a janela, o housekeeping remove a mesa (60s de varredura) e o proximo 'room:join' responde room:error 'Sala nao encontrada'.",
+      "lobby_visibility": "Salas cujo host esta desconectado NAO sao anunciadas em rooms:list; voltam a aparecer se o host reconectar dentro da janela.",
+      "render_free_tier": "O processo dorme apos ~15 min sem trafego; o ping do jogo e o /api/health mantem acordado."
+    },
+    "client_to_server": {
+      "ping": { "payload": {}, "effect": "responde 'pong'." },
+      "rooms:get": { "payload": {}, "effect": "responde 'rooms:list' com as salas abertas (host conectado)." },
+      "room:create": {
+        "payload": { "username": "string", "characterId": "CharacterId", "gameMode": "GameMode", "mustFollowSuitInEndgame": "boolean" },
+        "effect": "Cria sala privada; o autor vira cadeira 0 em WAITING e recebe room:state com o roomCode."
+      },
+      "room:join": {
+        "payload": { "roomCode": "string", "username": "string", "characterId": "CharacterId" },
+        "effect": "IDEMPOTENTE (tambem usado no reconexo). Se o clientId ja ocupa uma cadeira, religa-a e reenvia room:state. Senao ocupa a cadeira 1 e inicia a 1a mao. Falhas FATais -> room:error (sala inexistente / sala cheia)."
+      },
+      "room:leave": { "payload": {}, "effect": "Encerra a mesa para AMBOS; o oponente recebe 'room:closed'." },
+      "queue:join": {
+        "payload": { "username": "string", "characterId": "CharacterId", "gameMode": "GameMode", "mustFollowSuitInEndgame": "boolean" },
+        "effect": "Matchmaking 1v1. Emparelha SOMENTE jogadores com regras identicas (gameMode + mustFollowSuitInEndgame). Enquanto espera responde 'queue:waiting' com position."
+      },
+      "queue:leave": { "payload": {}, "effect": "Sai da fila; responde 'queue:left' e atualiza as posicoes restantes." },
+      "online:taunt": {
+        "payload": { "text": "string (frase PT-BR escolhida no cliente; sanitizada pelo servidor)" },
+        "effect": "Canal SOCIAL: nao altera regra, pontuacao nem estado. Rele APENAS para o oponente, sem eco ao autor. Sanitiza (colapsa espacos, corta em 120 chars) e limita a 1 envio/segundo por clientId; excedente devolve room:action_rejected 'Devagar nas provocacoes!'. Texto vazio/invalido e ignorado. Nao dispara room:state.",
+        "note": "NOVO v1.2. Proposto pela Sessao 2 no bus (frontend.client_to_server) e implementado no backend; as duas pontas casam exatamente."
+      },
+      "online:play_card": {
+        "payload": { "cardId": "string '{rank}_{suit}', ex.: 'A_espadas'" },
+        "effect": "Joga a carta. Se myPowerSelectionMode != NONE, a carta clicada e a escolha do poder (CONCILIACAO/PATRIARCA). Validacoes: vez, vaza nao resolvendo, carta na mao, legalidade (naipe na fase final + coacao do Grito). Acao ilegal NAO derruba a partida: responde room:action_rejected (PT-BR) e reenvia room:state."
+      },
+      "online:swap_trump": {
+        "payload": {},
+        "effect": "Troca o 2 do naipe de trunfo pela carta de trunfo exposta. Exige: sua vez, vaza vazia, nenhum poder em selecao, ter o 2 de trunfo e monte com > 1 carta."
+      },
+      "online:activate_power": {
+        "payload": {},
+        "effect": "Gasta 100 PI e ativa o poder do personagem. Exige: sua vez, 100 PI, poder nao usado nesta vaza, sem selecao pendente."
+      },
+      "online:next_round": {
+        "payload": {},
+        "effect": "So em ROUND_SUMMARY (proxima mao) ou GAME_OVER (rematch resetando tentos). Em outros status responde room:action_rejected."
+      }
+    },
+    "server_to_client": {
+      "pong": { "payload": {} },
+      "rooms:list": { "payload": { "rooms": "OnlineRoomSummary[]" }, "trigger": "no conect, em rooms:get e quando salas abrem/fecham." },
+      "queue:waiting": { "payload": { "position": "number (1-based)" }, "note": "Reenviado a cada mudanca na fila (novo v1.1)." },
+      "queue:left": { "payload": {} },
+      "room:error": { "payload": { "message": "string (PT-BR)" }, "fatal": true, "note": "Erro FATAL: sala inexistente, sala cheia, oponente saiu (combinado com room:closed). O front pode voltar ao lobby." },
+      "room:action_rejected": { "payload": { "message": "string (PT-BR)" }, "fatal": false, "note": "NOVO em v1.1. Rejeicao de acao de jogo (jogada ilegal, fora da vez, PI insuficiente...). NAO derruba a partida; vem seguido de room:state atualizado." },
+      "room:closed": { "payload": { "message": "string?" } },
+      "online:taunt": { "payload": { "text": "string (PT-BR, ate 120 chars)", "clientId": "string (remetente ORIGINAL)" }, "fatal": false, "note": "NOVO v1.2. Fala do adversario humano. E EFEMERA: nao entra no room:state nem no snapshot. So chega ao destinatario (sem eco ao autor). O cliente deve ignorar se msg.clientId for o proprio." },
+      "room:state": { "payload": { "state": "OnlineSyncedState" }, "note": "Snapshot COMPLETO e autoritativo, enviado aos DOIS jogadores a cada mutacao relevante e no reconexo." }
+    },
+    "schemas": {
+      "GameMode": "'bisca_3' | 'bisca_9'",
+      "CharacterId": "'pedro_i' | 'leopoldina' | 'isabel' | 'bonifacio' | 'pedro_ii'",
+      "Card": { "id": "string '{rank}_{suit}'", "suit": "'espadas'|'copas'|'ouros'|'paus'", "rank": "'2'|'3'|'4'|'5'|'6'|'Q'|'J'|'K'|'7'|'A'", "points": "number", "strength": "number (1=2 .. 10=A)" },
+      "OnlineRoomSummary": { "roomCode": "string", "hostUsername": "string", "hostCharacterId": "CharacterId", "gameMode": "GameMode", "mustFollowSuitInEndgame": "boolean", "playerCount": "number", "status": "'WAITING'|'PLAYING'" },
+      "OnlineSyncedState": {
+        "_note": "Autoritativo. Campos my*/opponent* refletem o ponto de vista da cadeira destino. NOVOS em v1.1: matchTargetTentos, serverTime.",
+        "roomCode": "string",
+        "status": "'WAITING'|'PLAYING'|'ROUND_SUMMARY'|'GAME_OVER'",
+        "gameMode": "GameMode",
+        "mustFollowSuitInEndgame": "boolean",
+        "roundNumber": "number",
+        "mySeat": "0 | 1",
+        "myUsername": "string",
+        "myCharacterId": "CharacterId",
+        "myHand": "Card[]",
+        "myPoints": "number",
+        "myTentos": "number",
+        "myImpeto": "number (0..100)",
+        "myPowerUsedThisTurn": "boolean",
+        "myPowerSelectionMode": "'NONE'|'SELECT_HAND_CARD_FOR_CONCILIACAO'|'SELECT_HAND_CARD_FOR_PATRIARCA'",
+        "myCoerced": "boolean",
+        "opponentConnected": "boolean",
+        "opponentUsername": "string",
+        "opponentCharacterId": "CharacterId",
+        "opponentHand": "Card[] (reais se opponentHandRevealed, senao dummies para contagem)",
+        "opponentHandCount": "number",
+        "opponentHandRevealed": "boolean",
+        "opponentPoints": "number",
+        "opponentTentos": "number",
+        "opponentImpeto": "number",
+        "opponentCoerced": "boolean",
+        "stockCount": "number",
+        "trumpCard": "Card | null",
+        "trumpSuit": "Suit",
+        "isMyTurn": "boolean",
+        "isResolvingTrick": "boolean",
+        "trickPointMultiplier": "number (Decreto Soberano: 2x/4x)",
+        "matchTargetTentos": "number (NOVO v1.1; hoje 4 - elimina o hardcoded do front)",
+        "serverTime": "number (NOVO v1.1; epoch ms do servidor no snapshot - base para ping/latencia)",
+        "currentTrick": "{ card: Card, playedByMe: boolean, playerName: string }[] (0..2)",
+        "trickFeedback": "{ wonByMe: boolean, winnerName: string, points: number, reason: string, impetoAwarded?: string|null } | null",
+        "lastEventBanner": "{ id: number (monotonico por sala), title, subtitle, badgeText?, theme:'gold'|'emerald'|'crimson', iconType:'swords'|'crown'|'flame'|'sparkles'|'zap' } | null",
+        "trickHistory": "{ trickNumber, wonByMe, winnerName, myCard: Card, opponentCard: Card, points, impetoAwarded? }[]",
+        "roundSummary": "{ myPoints, opponentPoints, wonByMe:boolean|'draw', tentosAwarded, outcomeType:'simples'|'capote'|'bandeira'|'empate', outcomeTitle, outcomeDescription, myBiscasAndAces: Card[], opponentBiscasAndAces: Card[] } | null"
+      }
+    },
+    "business_rules": {
+      "deck": "40 cartas (4 naipes x 10 ranks). Pontos: A=11, 7=10, K=4, J=3, Q=2, demais=0. Forca: 2=1 .. 6=5, Q=6, J=7, K=8, 7=9, A=10.",
+      "deal": "Mao inicial = 3 (bisca_3) ou 9 (bisca_9) cartas para cada. O restante e o monte. A ultima carta do monte fica EXPOSTA e define o naipe de trunfo (room.trumpCard).",
+      "draw": "Ao fim de cada vaza, o vencedor puxa primeiro: 1 carta para cada jogador, retiradas do topo do monte (indice 0). Monte vazio -> trumpCard passa a null.",
+      "trump": "Carta de trunfo vence carta de naipe comum; entre dois trunfos vale a forca. Empate de forca na mesma vaza: vence quem liderou.",
+      "follow_suit": "Obrigatorio seguir o naipe da vaza SOMENTE quando o monte esta vazio e mustFollowSuitInEndgame = true. Se nao tiver o naipe, joga livre.",
+      "swap_two_of_trump": "Quem tem o 2 do naipe de trunfo pode troca-lo pela carta exposta, na sua vez e antes de jogar, desde que haja monte (>1 carta) e a carta exposta nao seja o proprio 2.",
+      "coercion_grito": "Grito do Ipiranga (Dom Pedro I): coage o oponente a jogar, quando jogar, a carta de MAIOR pontuacao elegivel (desempate por forca). Se o oponente ja jogou na vaza atual, o efeito vale para a proxima jogada dele.",
+      "powers": {
+        "pedro_i": "Grito do Ipiranga - cobre 100 PI; coage o adversario.",
+        "pedro_ii": "Gabinete de Conciliacao - revela a mao adversaria e troca 1 carta da mao pelo topo do monte (ou +8 pts se monte/hand vazios).",
+        "bonifacio": "Estrategia do Patriarca - declara novo naipe de trunfo com uma carta da mao; se o monte esgotou, decreta naipe e ganha +6 pts.",
+        "leopoldina": "Decreto Soberano - dobra os pontos da vaza (acumula ate 4x); vaza de 0 pt base rende piso de +6 pts bonus.",
+        "isabel": "Redencao Dourada - resgata a carta de maior pontuacao perdida (permuta pela menor da mao) ou +12 pts se nao houver resgate possivel."
+      },
+      "impeto": "Barra 0..100 PI. Ganho por vaza: sobrecorte com pontuacao +50; corte de bisca/A +30; vaza de valor >=14 sem trunfo +15; corte comum +10. Poder custa 100 PI e so 1 por vaza (powerUsedThisTurn).",
+      "round_summary": "Compara pontos totais (cartas capturadas + bonus). Empate = 0 tento. Vitoria simples = 1 tento. >=91 pts = capote (2 tentos). Adversario zerado com vencedor >=120 = bandeira (4 tentos).",
+      "match": "Vitória do match ao atingir 4 tentos (MATCH_TARGET_TENTOS). O valor e publicado em room:state.matchTargetTentos.",
+      "matchmaking_fairness": "Emparelha somente regras identicas (gameMode + mustFollowSuitInEndgame); a mesa herda as regras do jogador que ja esperava."
+    },
+    "changes_published": [
+      "v1.2 (aditivo, sem breaking change): novo canal SOCIAL 'online:taunt' (client->server e server->client). Rele apenas ao oponente, sem eco; sanitiza (espacos colapsados, max 120 chars); anti-spam 1/segundo por clientId com resposta 'room:action_rejected'; nao afeta regras nem gera room:state.",
+      "v1.2: pedido vindo da Sessao 2 (balao central do adversario humano no VS_ONLINE). Contrato publicado aqui antes de virar producao; a Sessao 2 ja marcou 'ALINHADO com o backend' no lado dela do bus.",
+      "v1.1 (aditivo, sem breaking change): room:state ganhou matchTargetTentos:number (remove o hardcoded 4 do front).",
+      "v1.1: room:state ganhou serverTime:number (epoch ms) para ping/latencia.",
+      "v1.1: queue:waiting ganhou position:number (1-based) e e reenviado a cada mudanca da fila.",
+      "v1.1 NOVO server->client: room:action_rejected{message} para acoes de jogo rejeitadas (NAO-FATAL). room:error permanece reservado a falhas fatais. Motivo: o front atual devolve ao lobby ao receber room:error, o que seria errado numa jogada apenas ilegal.",
+      "v1.1 resiliencia: mesa sobrevive 5 min apos o ultimo socket cair (WAITING e PLAYING) e 'room:join' idempotente retoma a cadeira.",
+      "v1.1 lobby: salas com host desconectado nao sao mais anunciadas em rooms:list.",
+      "v1.1 matchmaking: so emparelha gameMode + mustFollowSuitInEndgame iguais."
+    ],
+    "answers_to_frontend_requests": [
+      "Contratos publicados aqui ANTES/alongside a implementacao (esta secao + changes_published).",
+      "Contrato assinado: ver contract_ack.",
+      "Resiliencia de sala: grace period = 300000 ms (5 min), uniforme para WAITING e PLAYING; 'room:join' idempotente retoma a partida.",
+      "room:state completo aos DOIS jogadores a cada mutacao; acao invalida agora gera room:action_rejected (PT-BR) + resync via room:state (nao usamos room:error para nao expulsar do lobby).",
+      "Mensagens de erro/rejeicao em PT-BR legivel.",
+      "Desejaveis entregues: serverTime (latencia), matchTargetTentos, push de rooms:list ja existente, position em queue:waiting."
+    ],
+    "contract_ack": {
+      "contract": "frontend v1 (agent_bus.frontend)",
+      "status": "accepted_with_additive_changes",
+      "version": "1.2",
+      "date": "2026-10-18T20:15:00-03:00",
+      "breaking_changes": false,
+      "consumed_unchanged": ["room:create", "room:join", "room:leave", "queue:join", "queue:leave", "online:play_card", "online:swap_trump", "online:activate_power", "online:next_round", "ping", "rooms:get"]
+    },
+    "notes": [
+      "Salas sao em memoria: restart/redeploy do Render perde todas; o cliente recebe room:error 'Sala nao encontrada' e volta ao lobby.",
+      "Nenhum campo antigo de OnlineSyncedState foi removido ou renomeado - os campos novos sao aditivos e o front ignora desconhecidos.",
+      "src/types/bisca.ts (backend) ganhou matchTargetTentos e serverTime em OnlineSyncedState; espelhar na branch do frontend.",
+      "Verificado com 'tsc --noEmit' (0 erros) e smoke test WS real: create/join/room:state, rejeicao fora da vez (room:action_rejected) e resolucao de vaza.",
+      "online:taunt verificado com smoke test WS real (11/11): relay so ao oponente, sem eco, higiene de texto (espacos + corte em 120), texto vazio ignorado, anti-spam 1/s com room:action_rejected ao autor e liberacao apos 1s, e zero broadcast de room:state."
+    ]
+  },
+  "frontend": {
+    "agent": "Sessao 2 - Frontend (interface)",
+    "workdir": "C:\\Users\\aysll\\projeto-frontend",
+    "branch": "feature/agente-frontend",
+    "updated_at": "2026-10-18T19:09:33-03:00",
+    "summary": "Cliente React 19 + Vite do jogo Bisca Imperial. Todo o modo online (VS_ONLINE) consome o contrato WS abaixo. No online o frontend NAO calcula regras: e um renderizador autoritativo do estado recebido em 'room:state' (efeitos otimistas apenas de audio/particulas). Definicoes TS completas dos schemas estao em src/types/bisca.ts (presente nas duas branches).",
+    "connection": {
+      "transport": "WebSocket (JSON por mensagem)",
+      "endpoint": "env VITE_WS_URL quando definido; senao mesmo host em '/ws-bisca' (ex.: wss://<host>/ws-bisca)",
+      "client_id": "Obrigatorio em TODA mensagem client->server (campo 'clientId'). O frontend gera um id persistente por aba (sessionStorage) e o reusa no reconexo.",
+      "keepalive": "cliente envia {type:'ping'} a cada 25s; watchdog fecha o socket apos 45s sem nenhuma mensagem do servidor quando dentro de uma sala",
+      "reconnect": "backoff exponencial 1s->15s; ao reconectar reenvia automaticamente 'room:join' com o ultimo roomCode para retomar a partida (tolera redeploys/restarts do Render que derrubam todos os sockets)"
+    },
+    "client_to_server": {
+      "rooms:get": { "_desc": "Lista salas abertas", "payload": {} },
+      "room:create": {
+        "_desc": "Cria sala privada; o criador fica em WAITING com o roomCode",
+        "payload": { "username": "string", "characterId": "CharacterId", "gameMode": "GameMode", "mustFollowSuitInEndgame": "boolean" }
+      },
+      "room:join": {
+        "_desc": "Entra por codigo. Deve ser IDEMPOTENTE: usado tambem no reconexo para retomar partida em andamento",
+        "payload": { "roomCode": "string", "username": "string", "characterId": "CharacterId" }
+      },
+      "room:leave": { "_desc": "Sai da sala (e da espera)", "payload": {} },
+      "queue:join": { "_desc": "Entra na fila de matchmaking", "payload": { "username": "string", "characterId": "CharacterId", "gameMode": "GameMode", "mustFollowSuitInEndgame": "boolean" } },
+      "queue:leave": { "payload": {} },
+      "online:play_card": {
+        "_desc": "Joga carta da mao. Se myPowerSelectionMode estiver ativo no estado, a carta clicada e a escolha do poder (CONCILIACAO/PATRIARCA). A autoridade sobre legalidade e do servidor.",
+        "payload": { "cardId": "string (formato estavel '{rank}_{suit}', ex.: 'A_espadas')" }
+      },
+      "online:swap_trump": { "_desc": "Decreto do 2 de Trunfo: troca o 2 do naipe de trunfo pela carta de trunfo exposta", "payload": {} },
+      "online:activate_power": { "_desc": "Gasta 100 PI e ativa o poder do personagem do jogador (5 poderes)", "payload": {} },
+      "online:next_round": { "_desc": "Avanca apos ROUND_SUMMARY (proxima mao) ou GAME_OVER (novo match)", "payload": {} },
+      "online:taunt": {
+        "_desc": "Provocacao/emote textual do jogador humano. Estado: ALINHADO com o backend (server.ts ja relé 'online:taunt' apenas ao OPONENTE, nunca ecoando ao autor). Regras do servidor: sanitiza (colapsa espacos, corta em 120 chars), limita a 1 envio/segundo por clientId e, se exceder, responde ao autor com 'room:action_rejected' (o frontend tem cooldown proprio de 8s, entao nao deve disparar). O frontend envia isto no VS_ONLINE ao clicar numa provocacao (teclas 1-4 / F1-F4).",
+        "payload": { "text": "string (frase PT-BR, escolhida no cliente a partir de uma lista fixa de provocoes)" }
+      },
+      "ping": { "payload": {} }
+    },
+    "server_to_client": {
+      "pong": { "payload": {} },
+      "rooms:list": { "payload": { "rooms": "OnlineRoomSummary[]" } },
+      "queue:waiting": { "payload": {} },
+      "queue:left": { "payload": {} },
+      "room:error": { "_desc": "Erro humano; se houver partida ativa o frontend volta ao lobby automaticamente", "payload": { "message": "string (PT-BR)" } },
+      "room:closed": { "payload": { "message": "string?" } },
+      "room:state": {
+        "_desc": "Snapshot autoritativo COMPLETO. Enviado a cada mutacao relevante e no reconexo. E a unica fonte de verdade do tabuleiro online.",
+        "payload": { "state": "OnlineSyncedState" }
+      },
+      "online:taunt": {
+        "_desc": "Fala do adversario humano, retransmitida pelo backend a partir do 'online:taunt' do outro jogador (ALINHADO com server.ts). E efemera (NAO entra no snapshot nem no 'room:state'). O frontend renderiza no balao central da mesa por ~3.2s. 'clientId' e o do REMETENTE ORIGINAL; o frontend descarta a mensagem se 'clientId' for o proprio (protecao contra eco).",
+        "payload": { "text": "string (<=120 chars)", "clientId": "string (remetente original)" }
+      },
+      "room:action_rejected": {
+        "_desc": "ACAO INVALIDA (ex.: carta fora de regra) ou abuso (spam de provocacao). NAO e fatality: o frontend NAO deve voltar ao lobby (ao contrario de 'room:error'). O servidor reenvia o snapshot autoritativo em seguida.",
+        "payload": { "message": "string (PT-BR)" }
+      }
+    },
+    "schemas": {
+      "GameMode": "'bisca_3' | 'bisca_9'",
+      "CharacterId": "'pedro_i' | 'leopoldina' | 'isabel' | 'bonifacio' | 'pedro_ii'",
+      "Card": { "id": "string", "suit": "'espadas'|'copas'|'ouros'|'paus'", "rank": "'2'|'3'|'4'|'5'|'6'|'Q'|'J'|'K'|'7'|'A'", "points": "number", "strength": "number (1=2 .. 10=A)" },
+      "OnlineRoomSummary": { "roomCode": "string", "hostUsername": "string", "hostCharacterId": "CharacterId", "gameMode": "GameMode", "mustFollowSuitInEndgame": "boolean", "playerCount": "number", "status": "'WAITING'|'PLAYING'" },
+      "OnlineSyncedState": {
+        "roomCode": "string",
+        "status": "'WAITING'|'PLAYING'|'ROUND_SUMMARY'|'GAME_OVER'",
+        "gameMode": "GameMode",
+        "mustFollowSuitInEndgame": "boolean",
+        "roundNumber": "number",
+        "mySeat": "0 | 1",
+        "myUsername": "string",
+        "myCharacterId": "CharacterId",
+        "myHand": "Card[]",
+        "myPoints": "number (pontos da mao atual)",
+        "myTentos": "number",
+        "myImpeto": "number (0..100)",
+        "myPowerUsedThisTurn": "boolean",
+        "myPowerSelectionMode": "'NONE'|'SELECT_HAND_CARD_FOR_CONCILIACAO'|'SELECT_HAND_CARD_FOR_PATRIARCA'",
+        "myCoerced": "boolean (Grito do Ipiranga ativo sobre mim)",
+        "opponentConnected": "boolean",
+        "opponentUsername": "string",
+        "opponentCharacterId": "CharacterId",
+        "opponentHand": "Card[] (reais se opponentHandRevealed, senao dummy apenas para contagem)",
+        "opponentHandCount": "number",
+        "opponentHandRevealed": "boolean",
+        "opponentPoints": "number",
+        "opponentTentos": "number",
+        "opponentImpeto": "number",
+        "opponentCoerced": "boolean",
+        "stockCount": "number",
+        "trumpCard": "Card | null",
+        "trumpSuit": "Suit",
+        "isMyTurn": "boolean",
+        "isResolvingTrick": "boolean",
+        "trickPointMultiplier": "number (Decreto Soberano: 2x/4x)",
+        "currentTrick": "{ card: Card, playedByMe: boolean, playerName: string }[] (0..2)",
+        "trickFeedback": "{ wonByMe: boolean, winnerName: string, points: number, reason: string, impetoAwarded?: string|null } | null",
+        "lastEventBanner": "{ id: number (monotonico por sala), title: string, subtitle: string, badgeText?: string, theme: 'gold'|'emerald'|'crimson', iconType: 'swords'|'crown'|'flame'|'sparkles'|'zap' } | null",
+        "trickHistory": "{ trickNumber: number, wonByMe: boolean, winnerName: string, myCard: Card, opponentCard: Card, points: number, impetoAwarded?: string }[]",
+        "roundSummary": "{ myPoints: number, opponentPoints: number, wonByMe: boolean | 'draw', tentosAwarded: number, outcomeType: 'simples'|'capote'|'bandeira'|'empate', outcomeTitle: string, outcomeDescription: string, myBiscasAndAces: Card[], opponentBiscasAndAces: Card[] } | null"
+      }
+    },
+    "assumptions_frontend": [
+      "Meta de match: 4 tentos (MATCH_TARGET_TENTOS hardcoded no frontend). Confirmar com o backend.",
+      "Cartas tem ids estaveis '{rank}_{suit}' e vem ja com points/strength preenchidos (mesma tabela do modo local: A=11pts, 7=10pts, K=4, Q=2, J=3; forca 2<A? nao: 2=1..A=10 com 7=9, A=10).",
+      "Servidor e a autoridade das regras: seguir naipe (incl. mustFollowSuitInEndgame), coacao do Grito do Ipiranga (jogar a carta de MAIOR pontuacao), troca do 2 de trunfo, validade dos 5 poderes.",
+      "Poderes por personagem (referencia de implementacao local em src/utils/biscaEngine.ts / App.tsx): pedro_i=Grito do Ipiranga (coage adversario), pedro_ii=Gabinete de Conciliacao (revela mao + troca 1 carta da mao pelo topo do monte, ou +8 pts se monte vazio), bonifacio=Estrategia do Patriarca (declara novo naipe de trunfo via carta da mao, ou +6 pts se monte vazio), leopoldina=Decreto Soberano (dobra pontos da vaza, ate 4x), isabel=Redencao Dourada (resgata carta de maior pontos das perdidas, ou +12 pts).",
+      "lastEventBanner.id e deduplicado no frontend por sala - precisa ser monotonicamente crescente (ex.: timestamp ou contador)."
+    ],
+    "requests_from_backend": [
+      "PUBLICAR aqui no bus qualquer contrato novo ou alterado antes de implementar; nada de breaking changes sem aviso.",
+      "Assinar este contrato: preencher backend.contract_ack com versao/data (ou publicar diff).",
+      "Resiliencia de sala: manter a sala viva por N minutos apos desconexao (Render reinicia/freezes). Publicar o valor de grace period e o comportamento esperado (frontend ja faz auto-rejoin via room:join).",
+      "room:state completo a cada mutacao, para os DOIS jogadores, inclusive apos jogadas validas invalidas (room:error com mensagem PT-BR).",
+      "Mensagens de erro em PT-BR legiveis para o usuario final.",
+      "Canal de provocações no online: JA IMPLEMENTADO pelo backend (server.ts) com formato ALINHADO ao frontend - obrigado, sem pedidos pendentes aqui.",
+      "Feedback de 'room:action_rejected' no tabuleiro (Sessao 2, follow-up NAO bloqueante): o backend agora emite 'room:action_rejected' para jogadas ilegais/abuso. O frontend ainda NAO exibe esse aviso durante a partida (so ignora). Proximo passo do frontend: mostrar um toast discreto (sem derrubar a partida, diferente de 'room:error').",
+      "Desejaveis (nao bloqueantes): serverTime/latency em room:state (exibir ping), push de rooms:list quando salas abrem/fecham, posicao na fila em queue:waiting, e campo matchTargetTentos em room:state para remover o hardcoded."
+    ],
+    "offers_to_backend": [
+      "Frontend sempre envia clientId; socket identificado por (socket + clientId).",
+      "Frontend e passivo: nenhum calculo de estado no online - e seguro implementar regras novas do lado do servidor.",
+      "IDs de carta estaveis entre frontend e backend (mao = array de Card com ids).",
+      "Compatibilidade: se o backend publicar novos campos em OnlineSyncedState, o frontend ignora campos desconhecidos sem quebrar (pode integrar quando a Sessao 2 consumir)."
+    ],
+    "contract_ack": null
+  }
+}

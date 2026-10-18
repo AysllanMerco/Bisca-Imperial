@@ -75,7 +75,10 @@ reinício de instância **derrubam todas as conexões**):
   a cada 2 s para sempre;
 - **Retomada automática da partida**: ao reconectar, o cliente reenvia
   `room:join` e o servidor religa a mesma cadeira e reenvia o estado — a mesa
-  continua de onde parou em vez de congelar;
+  continua de onde parou em vez de congelar. A mesa sobrevive até **5 minutos
+  (`ROOM_GRACE_PERIOD_MS`)** após o último socket cair, tanto em partida
+  (`PLAYING`) quanto no saguão (`WAITING`); só depois desse prazo ela é
+  removida pelo housekeeping.
 - **Se a sala não existe mais** (servidor reiniciado/redeploy), o jogador
   recebe a mensagem clara *"Sala não encontrada"* e volta ao Salão, em vez de
   ficar preso numa mesa morta sem resposta aos cliques;
