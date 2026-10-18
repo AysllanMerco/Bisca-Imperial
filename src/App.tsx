@@ -2883,17 +2883,29 @@ export default function App() {
 
           {/* Flat Single-Line Control Hint Footer */}
           <div className="text-center text-xs text-[#D6C7B2]/85 tracking-wide">
-            <span>Enter Iniciar</span>
+            <span>
+              <span className="hidden sm:inline">Enter </span>Iniciar
+            </span>
             <span className="mx-2">·</span>
-            <span>1–9 Jogar Carta</span>
+            <span>
+              <span className="hidden sm:inline">1–9 </span>Jogar Carta
+            </span>
             <span className="mx-2">·</span>
-            <span>P Ativar Poder (100 PI)</span>
+            <span>
+              <span className="hidden sm:inline">P </span>Ativar Poder (100 PI)
+            </span>
             <span className="mx-2">·</span>
-            <span>T Trocar 2 de Trunfo</span>
+            <span>
+              <span className="hidden sm:inline">T </span>Trocar 2 de Trunfo
+            </span>
             <span className="mx-2">·</span>
-            <span>R Regras e Poderes</span>
+            <span>
+              <span className="hidden sm:inline">R </span>Regras e Poderes
+            </span>
             <span className="mx-2">·</span>
-            <span>Esc Pausa</span>
+            <span>
+              <span className="hidden sm:inline">Esc </span>Pausa
+            </span>
           </div>
         </main>
       )}
@@ -3439,9 +3451,19 @@ export default function App() {
                             : `Sua vez de puxar a vaza, ${displayUsername}`}
                         </div>
                         <p className="text-xs text-[#D6C7B2]/80 mt-1">
-                          {coercedPlayer === 'player'
-                            ? 'Escolha uma carta da sua mão'
-                            : 'Clique em uma carta ou pressione 1–9 (P para Poder)'}
+                          {coercedPlayer === 'player' ? (
+                            'Escolha uma carta da sua mão'
+                          ) : (
+                            <>
+                              <span className="hidden sm:inline">
+                                Clique em uma carta ou pressione 1–9 (P para
+                                Poder)
+                              </span>
+                              <span className="sm:hidden">
+                                Clique em uma carta
+                              </span>
+                            </>
+                          )}
                         </p>
                       </>
                     ) : (
@@ -3748,7 +3770,7 @@ export default function App() {
                 <Zap className="w-3.5 h-3.5 fill-current shrink-0" />
                 <span className="sm:hidden">
                   {playerImpeto >= 100
-                    ? 'Ativar Poder [P]'
+                    ? 'Ativar Poder'
                     : `Poder (${playerImpeto}%)`}
                 </span>
                 <span className="hidden sm:inline">
@@ -3924,7 +3946,7 @@ export default function App() {
                 }}
                 className="w-full py-3 px-4 rounded-xl bg-[#D97706] hover:bg-[#B45309] text-white font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                Retomar Partida [Esc / Enter]
+                Retomar Partida<span className="hidden sm:inline"> [Esc / Enter]</span>
               </button>
 
               {matchMode === 'VS_BOT' && (
@@ -4122,7 +4144,7 @@ export default function App() {
                     }}
                     className="w-full py-3.5 px-6 rounded-xl bg-[#D97706] hover:bg-[#B45309] text-white font-display font-bold text-base transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    Próxima Mão [Enter / Espaço]
+                    Próxima Mão<span className="hidden sm:inline"> [Enter / Espaço]</span>
                   </button>
                 ) : (
                   <button
@@ -4130,9 +4152,17 @@ export default function App() {
                     onClick={handleStartNewMatch}
                     className="w-full py-3.5 px-6 rounded-xl bg-[#D97706] hover:bg-[#B45309] text-white font-display font-bold text-base transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   >
-                    {matchMode === 'VS_ONLINE'
-                      ? 'Revanche na Mesa [Enter]'
-                      : 'Nova Partida [Enter]'}
+                    {matchMode === 'VS_ONLINE' ? (
+                      <>
+                        Revanche na Mesa
+                        <span className="hidden sm:inline"> [Enter]</span>
+                      </>
+                    ) : (
+                      <>
+                        Nova Partida
+                        <span className="hidden sm:inline"> [Enter]</span>
+                      </>
+                    )}
                   </button>
                 )}
 

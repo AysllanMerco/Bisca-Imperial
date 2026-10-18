@@ -1,6 +1,7 @@
 import React, {
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   forwardRef,
 } from 'react';
@@ -115,6 +116,17 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
   const sealPoolRef = useRef<SealEffect[]>([]);
   const celebrationTimersRef = useRef<number[]>([]);
 
+  // Mobile-lite: abaixo de 640px (mesmo breakpoint 'sm' do layout) reduzimos a
+  // carga do canvas de partículas — que é fullscreen e roda em loop contínuo —
+  // SEM remover nenhum efeito. O desktop (>= 640px) fica idêntico ao anterior.
+  const mobileLite = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 639px)').matches,
+    []
+  );
+
   // Initialize fixed object pools once
   if (poolRef.current.length === 0) {
     for (let i = 0; i < POOL_SIZE; i++) {
@@ -186,7 +198,9 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
     if (!canvas) return;
     const cx = options?.x ?? canvas.width * 0.5;
     const cy = options?.y ?? canvas.height * 0.48;
-    const count = options?.count ?? 45;
+    const requested = options?.count ?? 45;
+    // No mobile, metade das partículas por explosão (mesmo efeito, menos custo).
+    const count = mobileLite ? Math.max(8, Math.round(requested * 0.5)) : requested;
     const colors = PALETTES[options?.palette ?? 'gold'];
     const includeSuits = options?.includeSuits ?? true;
 
@@ -397,25 +411,30 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
       return () => window.removeEventListener('resize', handleResize);
     }
 
-    // Ambient tavern gold dust motes
-    const motes: DustMote[] = Array.from({ length: DUST_COUNT }, () => ({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * window.innerHeight,
-      vx: (Math.random() - 0.5) * 12,
-      vy: -4 - Math.random() * 10,
-      radius: 1 + Math.random() * 1.8,
-      alpha: 0.08 + Math.random() * 0.18,
-      phase: Math.random() * Math.PI * 2,
-    }));
+    // Ambient tavern gold dust motes (menos poeira no mobile para aliviar o
+    // loop fullscreen contínuo; o efeito permanece).
+    const motes: DustMote[] = Array.from(
+      { length: mobileLite ? 10 : DUST_COUNT },
+      () => ({
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        vx: (Math.random() - 0.5) * 12,
+        vy: -4 - Math.random() * 10,
+        radius: 1 + Math.random() * 1.8,
+        alpha: 0.08 + Math.random() * 0.18,
+        phase: Math.random() * Math.PI * 2,
+      })
+    );
 
     let lastTime = performance.now();
     let rafId = 0;
     let ambientAccumulator = 0;
 
     // True while any burst/ring/slash is playing. The ambient dust layer on its
-    // own is slow and decorative, so it can be sampled at ~30fps; its motion is
-    // time-based, so the rendered result is identical while phones do half the
-    // full-screen canvas work.
+    // own is slow and decorative, so it can be sampled well below 60fps; its
+    // motion is time-based, so the rendered result is identical while phones do
+    // far less full-screen canvas work (15fps no mobile, 30fps no desktop).
+    const ambientFrameInterval = mobileLite ? 1 / 15 : 1 / 30;
     const hasActiveEffects = () => {
       const pool = poolRef.current;
       for (let i = 0; i < pool.length; i++) if (pool[i].active) return true;
@@ -437,7 +456,7 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
         ambientAccumulator = 0;
       } else {
         ambientAccumulator += rawDt;
-        if (ambientAccumulator < 1 / 30) {
+        if (ambientAccumulator < ambientFrameInterval) {
           rafId = requestAnimationFrame(tick);
           return;
         }
@@ -680,7 +699,7 @@ export const ParticleCanvas = forwardRef<ParticleCanvasHandle, object>(
       window.removeEventListener('resize', handleResize);
       celebrationTimersRef.current.forEach((id) => window.clearTimeout(id));
     };
-  }, []);
+  }, [mobileLite]);
 
   return (
     <canvas

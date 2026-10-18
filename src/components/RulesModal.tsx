@@ -69,7 +69,7 @@ export const RulesModal: React.FC<RulesModalProps> = ({ isOpen, onClose }) => {
               </h3>
             </div>
             <p>
-              Cada jogador possui um medidor de <strong className="font-mono-num text-[#FBBF24]">0 a 100 Pontos de Ímpeto (PI)</strong>. Ao atingir <strong className="font-mono-num text-[#34D399]">100 PI</strong>, o botão de habilidade acende e você pode ativar o poder do seu personagem no seu turno antes de jogar uma carta (Tecla <kbd className="px-1.5 py-0.5 rounded bg-black/50 border border-white/20 font-mono-num text-xs">P</kbd>):
+              Cada jogador possui um medidor de <strong className="font-mono-num text-[#FBBF24]">0 a 100 Pontos de Ímpeto (PI)</strong>. Ao atingir <strong className="font-mono-num text-[#34D399]">100 PI</strong>, o botão de habilidade acende e você pode ativar o poder do seu personagem no seu turno antes de jogar uma carta<span className="hidden sm:inline"> (Tecla <kbd className="px-1.5 py-0.5 rounded bg-black/50 border border-white/20 font-mono-num text-xs">P</kbd>)</span>:
             </p>
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="rounded-xl bg-black/35 border border-[#FBBF24]/40 p-3">

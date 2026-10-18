@@ -143,3 +143,35 @@
   animation: ringTensionPulse 1.9s ease-in-out infinite;
 }
 
+/* ============================================================
+   PERFORMANCE (MOBILE)
+   Abaixo de 640px (o breakpoint 'sm' do Tailwind usado no layout)
+   trocamos as animações que mais repintam por versões estáticas ou
+   compositadas. Nenhum efeito é removido — só deixa de repintar em
+   loop contínuo. A versão desktop (>= 640px) permanece idêntica.
+   ============================================================ */
+@media (max-width: 639px) {
+  /* Brilho de carta de alto valor (Bisca/Ás): halo estático, sem pulso de
+     box-shadow (que repinta a carta a cada frame). */
+  .card-high-value-glow {
+    animation: none;
+    box-shadow:
+      0 10px 24px rgba(0, 0, 0, 0.55),
+      0 0 16px 2px rgba(251, 191, 36, 0.4);
+  }
+
+  /* Anel central na reta final: mesma aura, mas estática. */
+  .animate-ring-tension {
+    animation: none;
+    box-shadow: inset 0 0 30px rgba(251, 191, 36, 0.26);
+    border-color: rgba(251, 191, 36, 0.55);
+  }
+
+  /* Vinheta de reta final: opacidade fixa (evita recompor a tela inteira
+     a cada frame). */
+  .animate-endgame-vignette {
+    animation: none;
+    opacity: 0.72;
+  }
+}
+
