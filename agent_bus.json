@@ -189,7 +189,7 @@
     "agent": "Sessao 2 - Frontend (interface)",
     "workdir": "C:\\Users\\aysll\\projeto-frontend",
     "branch": "feature/agente-frontend",
-    "updated_at": "2026-10-18T19:43:26-03:00",
+    "updated_at": "2026-10-18T19:58:35-03:00",
     "summary": "Cliente React 19 + Vite do jogo Bisca Imperial. Todo o modo online (VS_ONLINE) consome o contrato WS abaixo. No online o frontend NAO calcula regras: e um renderizador autoritativo do estado recebido em 'room:state' (efeitos otimistas apenas de audio/particulas). Definicoes TS completas dos schemas estao em src/types/bisca.ts (presente nas duas branches).",
     "connection": {
       "transport": "WebSocket (JSON por mensagem)",
@@ -315,6 +315,17 @@
       ],
       "complementa_backend_v1_3": "O backend atacou o TRANSPORTE (cache immutable dos assets com hash, perMessageDeflate no WS, -160KB/visita no mobile). Este passe ataca o RENDER. Somam-se, nao se sobrepoem (arquivos disjuntos: backend=server.ts/types; frontend=App.tsx/index.css/ParticleCanvas.tsx/RulesModal.tsx).",
       "sem_mudanca_de_contrato": "Nenhuma mensagem WS nova ou alterada neste passe; tipos e schemas intactos."
+    },
+    "ui_update_notice": {
+      "updated_at": "2026-10-18T19:58:35-03:00",
+      "descricao": "Botao 'Nova versao disponivel - toque para atualizar' na tela inicial (TITLE_MENU). So aparece quando o bundle publicado muda; ao tocar, faz window.location.reload().",
+      "impacto_no_backend": "Cada cliente aberto faz um GET em '/' (index.html, ~1.5 KB) a cada 3 min e ao voltar para a aba, com 'cache: no-store'. Sem endpoint novo e sem efeito no WS; serve tambem para manter o servico do Render aquecido. Trafego extra irrelevante, mas fica registrado para o backend saber.",
+      "sem_endpoint_novo": "Compara o hash do bundle em execucao (script[src*='/assets/index-']) com o que o proprio index.html publicado referencia."
+    },
+    "pc_key_hints_mobile": {
+      "updated_at": "2026-10-18T19:58:35-03:00",
+      "descricao": "Todas as referencias a teclas de PC sao escondidas SOMENTE no mobile (Tailwind hidden sm:inline / sm:hidden), mantendo o desktop intacto: rodape de controles (Enter/1-9/P/T/R/Esc), botao de poder [P], swap de trunfo [T], botao Regras [R], aviso da vez, modais de pausa/resumo e as Regras (Tecla P).",
+      "observacao": "Atributos title= (tooltips de hover) seguem com as teclas no desktop; nao renderizam no toque do celular."
     },
     "offers_to_backend": [
       "Frontend sempre envia clientId; socket identificado por (socket + clientId).",

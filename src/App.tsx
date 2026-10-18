@@ -21,6 +21,7 @@ import {
   Bot,
   Hourglass,
   Shield,
+  RefreshCw,
 } from 'lucide-react';
 import {
   BotMood,
@@ -239,6 +240,57 @@ export default function App() {
     null
   );
   const [heroSelectedCardIdx, setHeroSelectedCardIdx] = useState<number>(1);
+
+  // Aviso de nova versão publicada. Checagem leve: compara o hash do bundle
+  // em execução com o que está publicado em '/'. Some do fluxo em dev/preview
+  // (sem bundle com hash) e só acende quando existe uma versão mais nova.
+  const [updateReady, setUpdateReady] = useState<boolean>(false);
+
+  // Checagem de atualização: descobre o bundle em execução e, de tempo em tempo
+  // (e ao voltar para a aba), pergunta o index.html publicado para ver se o
+  // hash mudou. Falha em silêncio (sem internet/serviço dormindo) e tenta de
+  // novo depois. Custo: um GET minúsculo do index.html (~1.5 KB) a cada 3 min.
+  useEffect(() => {
+    const currentBundle = document
+      .querySelector<HTMLScriptElement>(
+        'script[type="module"][src*="/assets/index-"]'
+      )
+      ?.getAttribute('src');
+    // Em dev/preview o entry é /src/main.tsx: não há hash para comparar.
+    if (!currentBundle) return;
+
+    let cancelled = false;
+    const checkForUpdate = async () => {
+      if (document.visibilityState === 'hidden') return;
+      try {
+        const res = await fetch('/', { cache: 'no-store' });
+        if (!res.ok) return;
+        const html = await res.text();
+        const deployedBundle = html.match(/\/assets\/index-[\w-]+\.js/)?.[0];
+        if (
+          !cancelled &&
+          deployedBundle &&
+          !currentBundle.includes(deployedBundle)
+        ) {
+          setUpdateReady(true);
+        }
+      } catch {
+        // Sem rede ou serviço dormindo (Render free): ignora e tenta depois.
+      }
+    };
+
+    checkForUpdate();
+    const timer = window.setInterval(checkForUpdate, 180000); // 3 min
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') checkForUpdate();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
   // Psicologia de Mesa: provocações (emotes), balões de fala e humor da IA
   const [tauntCooldownLeft, setTauntCooldownLeft] = useState<number>(0);
@@ -2447,6 +2499,22 @@ export default function App() {
       ===================================================================== */}
       {gameState === 'TITLE_MENU' && (
         <main className="relative z-30 w-full h-full flex flex-col justify-between px-5 py-4 sm:px-10 sm:py-6 overflow-y-auto">
+          {/* Aviso de nova versão publicada (só aparece quando há atualização) */}
+          {updateReady && (
+            <button
+              type="button"
+              onClick={() => {
+                soundFx.playButtonTap();
+                window.location.reload();
+              }}
+              aria-live="polite"
+              className="mx-auto mb-3 flex items-center gap-2 px-4 py-2 rounded-xl bg-[#10B981] text-[#052E16] font-display font-bold text-xs sm:text-sm shadow-[0_0_22px_rgba(16,185,129,0.55)] hover:bg-[#34D399] transition-colors cursor-pointer animate-pulse"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Nova versão disponível — toque para atualizar</span>
+            </button>
+          )}
+
           {/* Top Perimeter Controls */}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#D6C7B2]">
@@ -2469,7 +2537,10 @@ export default function App() {
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg walnut-rail border border-[#FBBF24]/30 text-xs font-medium text-[#FBF7EE] hover:border-[#FBBF24] transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <BookOpen className="w-3.5 h-3.5 text-[#FBBF24]" />
-                <span>Regras e Poderes [R]</span>
+                <span>
+                  Regras e Poderes
+                  <span className="hidden sm:inline"> [R]</span>
+                </span>
               </button>
               <button
                 type="button"
@@ -3315,7 +3386,10 @@ export default function App() {
                   className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-gradient-to-r from-[#F59E0B] to-[#D97706] text-[#1B0E07] text-[11px] sm:text-xs font-bold flex items-center gap-1.5 sm:gap-2 shadow-[0_0_20px_rgba(251,191,36,0.5)] cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <ArrowLeftRight className="w-3.5 h-3.5" />
-                  <span>Trocar pelo 2 de Trunfo [T]</span>
+                  <span>
+                    Trocar pelo 2 de Trunfo
+                    <span className="hidden sm:inline"> [T]</span>
+                  </span>
                 </motion.button>
               )}
             </div>
@@ -3821,7 +3895,7 @@ export default function App() {
                     {Icon && (
                       <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
                     )}
-                    <span className="font-mono-num text-[9px] opacity-70">
+                    <span className="hidden sm:inline font-mono-num text-[9px] opacity-70">
                       F{index + 1}
                     </span>
                     {isOnCooldown && (
