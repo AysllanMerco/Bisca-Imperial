@@ -191,15 +191,42 @@ function getOpenRoomsList(): OnlineRoomSummary[] {
   return list;
 }
 
+/**
+ * Coalesce a difusao da lista de salas. Matchmaking em rajada (varias salas
+ * criadas/entradas no mesmo instante) gerava um `rooms:list` para TODOS os
+ * sockets conectados a cada evento. No celular isso e trafego de fundo que nao
+ * agrega nada: as-salas mudam uma vez por vez. requests diretos (`rooms:get`)
+ * continuam respondendo na hora.
+ */
+const ROOMS_LIST_MIN_INTERVAL_MS = 1000;
+let lastRoomsBroadcastAt = 0;
+let roomsBroadcastTimer: NodeJS.Timeout | null = null;
+
 function broadcastOpenRooms(wss: WebSocketServer): void {
-  const payload = JSON.stringify({
-    type: 'rooms:list',
-    rooms: getOpenRoomsList(),
-  });
-  for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(payload);
+  const emit = () => {
+    roomsBroadcastTimer = null;
+    lastRoomsBroadcastAt = Date.now();
+    const payload = JSON.stringify({
+      type: 'rooms:list',
+      rooms: getOpenRoomsList(),
+    });
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
     }
+  };
+
+  const elapsed = Date.now() - lastRoomsBroadcastAt;
+  if (elapsed >= ROOMS_LIST_MIN_INTERVAL_MS) {
+    emit();
+    return;
+  }
+  if (!roomsBroadcastTimer) {
+    roomsBroadcastTimer = setTimeout(
+      emit,
+      ROOMS_LIST_MIN_INTERVAL_MS - elapsed
+    );
   }
 }
 
