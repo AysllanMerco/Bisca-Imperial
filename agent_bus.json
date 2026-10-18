@@ -187,7 +187,7 @@
     "agent": "Sessao 2 - Frontend (interface)",
     "workdir": "C:\\Users\\aysll\\projeto-frontend",
     "branch": "feature/agente-frontend",
-    "updated_at": "2026-10-18T19:09:33-03:00",
+    "updated_at": "2026-10-18T19:43:26-03:00",
     "summary": "Cliente React 19 + Vite do jogo Bisca Imperial. Todo o modo online (VS_ONLINE) consome o contrato WS abaixo. No online o frontend NAO calcula regras: e um renderizador autoritativo do estado recebido em 'room:state' (efeitos otimistas apenas de audio/particulas). Definicoes TS completas dos schemas estao em src/types/bisca.ts (presente nas duas branches).",
     "connection": {
       "transport": "WebSocket (JSON por mensagem)",
@@ -303,12 +303,39 @@
       "Feedback de 'room:action_rejected' no tabuleiro (Sessao 2, follow-up NAO bloqueante): o backend agora emite 'room:action_rejected' para jogadas ilegais/abuso. O frontend ainda NAO exibe esse aviso durante a partida (so ignora). Proximo passo do frontend: mostrar um toast discreto (sem derrubar a partida, diferente de 'room:error').",
       "Desejaveis (nao bloqueantes): serverTime/latency em room:state (exibir ping), push de rooms:list quando salas abrem/fecham, posicao na fila em queue:waiting, e campo matchTargetTentos em room:state para remover o hardcoded."
     ],
+    "performance_mobile": {
+      "updated_at": "2026-10-18T19:43:26-03:00",
+      "goal": "Aliviar o render no celular SEM remover nenhum efeito/feature. A versao desktop (>=640px) permanece identica.",
+      "frontend_render": [
+        "ParticleCanvas em modo lite no mobile (<640px): poeira ambiente 32->10, loop ambiente 30fps->15fps e 50% das particulas por explosao (minimo 8). Reduz muito o loop fullscreen continuo quando ocioso.",
+        "CSS mobile: brilho de carta de alto valor (Bisca/As), anel da reta final e vinheta de reta final passam a ser estaticos - deixam de repintar box-shadow/opacity em tela cheia a cada frame.",
+        "Atalhos de teclado de PC escondidos SOMENTE no mobile (Enter, Esc, P, 1-9, Espaco, F1-F4) no rodape de controles, botao de poder, aviso da vez, modais de pausa/resumo e nas regras."
+      ],
+      "complementa_backend_v1_3": "O backend atacou o TRANSPORTE (cache immutable dos assets com hash, perMessageDeflate no WS, -160KB/visita no mobile). Este passe ataca o RENDER. Somam-se, nao se sobrepoem (arquivos disjuntos: backend=server.ts/types; frontend=App.tsx/index.css/ParticleCanvas.tsx/RulesModal.tsx).",
+      "sem_mudanca_de_contrato": "Nenhuma mensagem WS nova ou alterada neste passe; tipos e schemas intactos."
+    },
     "offers_to_backend": [
       "Frontend sempre envia clientId; socket identificado por (socket + clientId).",
       "Frontend e passivo: nenhum calculo de estado no online - e seguro implementar regras novas do lado do servidor.",
       "IDs de carta estaveis entre frontend e backend (mao = array de Card com ids).",
       "Compatibilidade: se o backend publicar novos campos em OnlineSyncedState, o frontend ignora campos desconhecidos sem quebrar (pode integrar quando a Sessao 2 consumir)."
     ],
-    "contract_ack": null
+    "contract_ack": {
+      "contract": "backend v1.3 (agent_bus.backend)",
+      "status": "accepted",
+      "version": "1.3",
+      "date": "2026-10-18T19:43:26-03:00",
+      "breaking_changes": false,
+      "consumed_unchanged": [
+        "online:taunt (client->server e server->client) - v1.2, alinhado e testado em producao",
+        "room:state, room:error, room:closed, rooms:list, queue:waiting, queue:left, ping/pong",
+        "room:action_rejected - v1.1, reconhecido (ainda sem toast na UI; follow-up nao bloqueante)"
+      ],
+      "pending_adoption": [
+        "matchTargetTentos (v1.1) - frontend ainda usa MATCH_TARGET_TENTOS=4 hardcoded",
+        "serverTime (v1.1) - nao exibimos ping/latencia ainda"
+      ],
+      "notes": "v1.3 e otimizacao de transporte (sem mudanca de contrato) e casa com o passe de perf de RENDER do frontend. Nenhum conflito de arquivos entre as sessoes."
+    }
   }
 }
