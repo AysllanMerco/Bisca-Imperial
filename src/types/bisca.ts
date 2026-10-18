@@ -162,6 +162,10 @@ export interface OnlineSyncedState {
   isMyTurn: boolean;
   isResolvingTrick: boolean;
   trickPointMultiplier: number;
+  /** Meta de tentos que decide o match. O backend e a autoridade do valor. */
+  matchTargetTentos: number;
+  /** Epoch ms do servidor no instante deste snapshot (base para ping/latencia). */
+  serverTime: number;
   currentTrick: {
     card: Card;
     playedByMe: boolean;

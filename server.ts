@@ -31,6 +31,46 @@ const __dirname = path.dirname(__filename);
 
 const MATCH_TARGET_TENTOS = 4;
 
+/**
+ * Janela de graca apos o ultimo jogador cair: a mesa (inclusive em WAITING)
+ * continua de pe por este periodo para o cliente conseguir retomar a partida
+ * via `room:join` (redeploys/restarts do Render derrubam todos os sockets).
+ * Publicado no agent_bus.json como contrato de resiliencia.
+ */
+const ROOM_GRACE_PERIOD_MS = 5 * 60 * 1000;
+
+/**
+ * Rejeicao NAO-FATAL de uma acao de jogo: envia uma mensagem legivel (PT-BR)
+ * em `room:action_rejected` e reenvia o snapshot autoritativo ao autor.
+ *
+ * Nao usamos `room:error` aqui de proposito: o frontend trata `room:error`
+ * como fatality e devolve o jogador ao lobby, o que seria errado para uma
+ * jogada apenas ilegal (ex.: carta fora de regra).
+ */
+function rejectAction(
+  ws: WebSocket | null,
+  room: GameRoom,
+  message: string
+): void {
+  sendJson(ws, { type: 'room:action_rejected', message });
+  broadcastRoomState(room);
+}
+
+/** Anti-spam das provocacoes (canal social): clientId -> ultimo envio (ms). */
+const lastTauntAtByClient = new Map<string, number>();
+const TAUNT_MIN_INTERVAL_MS = 1000;
+const TAUNT_MAX_CHARS = 120;
+
+/** Higieniza a provocacao: remove controles, colapsa espacos e corta o tamanho. */
+function sanitizeTaunt(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned ? cleaned.slice(0, TAUNT_MAX_CHARS) : null;
+}
+
 interface SeatState {
   seat: 0 | 1;
   clientId: string;
@@ -123,7 +163,7 @@ function getOpenRoomsList(): OnlineRoomSummary[] {
   const list: OnlineRoomSummary[] = [];
   for (const room of rooms.values()) {
     const host = room.seats[0];
-    if (host && room.status === 'WAITING') {
+    if (host && host.connected && room.status === 'WAITING') {
       list.push({
         roomCode: room.roomCode,
         hostUsername: host.username,
@@ -148,6 +188,13 @@ function broadcastOpenRooms(wss: WebSocketServer): void {
       client.send(payload);
     }
   }
+}
+
+/** Reenvia a posicao de cada jogador na fila (1-based) sempre que ela muda. */
+function broadcastQueuePositions(): void {
+  matchmakingQueue.forEach((entry, idx) => {
+    sendJson(entry.ws, { type: 'queue:waiting', position: idx + 1 });
+  });
 }
 
 function buildSyncedStateForSeat(
@@ -261,6 +308,8 @@ function buildSyncedStateForSeat(
     isMyTurn: room.turnSeat === mySeat,
     isResolvingTrick: room.isResolvingTrick,
     trickPointMultiplier: room.trickPointMultiplier,
+    matchTargetTentos: MATCH_TARGET_TENTOS,
+    serverTime: Date.now(),
     currentTrick: room.currentTrick.map((t) => ({
       card: t.card,
       playedByMe: t.seat === mySeat,
@@ -568,10 +617,15 @@ async function startServer() {
             matchmakingQueue.splice(existingIdx, 1);
           }
 
-          // Check if another active player is waiting in the queue
+          // Check if another active player is waiting in the queue for the
+          // SAME rule set (mode + obrigatoriedade de naipe). Mismatched rules
+          // must never be paired - it would silently change a player's game.
           const opponentIdx = matchmakingQueue.findIndex(
             (q) =>
-              q.clientId !== clientId && q.ws.readyState === WebSocket.OPEN
+              q.clientId !== clientId &&
+              q.ws.readyState === WebSocket.OPEN &&
+              q.gameMode === gameMode &&
+              q.mustFollowSuitInEndgame === mustFollowSuitInEndgame
           );
 
           if (opponentIdx !== -1) {
@@ -639,6 +693,8 @@ async function startServer() {
             clientRoomMap.set(clientId, { roomCode, seat: 1 });
             startRoomRound(newRoom, 0, true, 1);
             broadcastOpenRooms(wss);
+            // Restantes da fila veem sua nova posicao.
+            broadcastQueuePositions();
           } else {
             matchmakingQueue.push({
               clientId,
@@ -648,7 +704,7 @@ async function startServer() {
               gameMode,
               mustFollowSuitInEndgame,
             });
-            sendJson(ws, { type: 'queue:waiting' });
+            broadcastQueuePositions();
           }
           return;
         }
@@ -659,6 +715,7 @@ async function startServer() {
           );
           if (idx !== -1) matchmakingQueue.splice(idx, 1);
           sendJson(ws, { type: 'queue:left' });
+          broadcastQueuePositions();
           return;
         }
 
@@ -696,29 +753,79 @@ async function startServer() {
         const opp = room.seats[oppSeat];
         if (!me || !opp) return;
 
-        // 6. SWAP 2 OF TRUMP
+        // 6. TAUNT / PROVOCACAO (canal social; nao altera regra nenhuma)
+        // Relé apenas para o OPONENTE e nunca ecoa de volta ao autor.
+        if (msg.type === 'online:taunt') {
+          const now = Date.now();
+          const lastAt = lastTauntAtByClient.get(clientId) || 0;
+          if (now - lastAt < TAUNT_MIN_INTERVAL_MS) {
+            sendJson(ws, {
+              type: 'room:action_rejected',
+              message: 'Devagar nas provocações!',
+            });
+            return;
+          }
+          const tauntText = sanitizeTaunt(msg.text);
+          if (!tauntText) return;
+          lastTauntAtByClient.set(clientId, now);
+
+          sendJson(opp.ws, {
+            type: 'online:taunt',
+            clientId: me.clientId,
+            text: tauntText,
+          });
+          return;
+        }
+
+        // 7. SWAP 2 OF TRUMP
         if (msg.type === 'online:swap_trump') {
-          if (
-            room.status !== 'PLAYING' ||
-            room.turnSeat !== mySeat ||
-            room.currentTrick.length > 0 ||
-            room.isResolvingTrick ||
-            me.powerSelectionMode !== 'NONE' ||
-            !room.trumpCard
-          ) {
+          if (room.status !== 'PLAYING') {
+            rejectAction(ws, room, 'A partida não está em andamento.');
+            return;
+          }
+          if (room.isResolvingTrick || room.currentTrick.length > 0) {
+            rejectAction(
+              ws,
+              room,
+              'Aguarde a resolução da vaza para trocar o 2 de Trunfo.'
+            );
+            return;
+          }
+          if (room.turnSeat !== mySeat || me.powerSelectionMode !== 'NONE') {
+            rejectAction(
+              ws,
+              room,
+              'Você só pode trocar o 2 de Trunfo na sua vez e antes de escolher um poder.'
+            );
+            return;
+          }
+          if (!room.trumpCard) {
+            rejectAction(ws, room, 'Não há carta de Trunfo exposta para trocar.');
             return;
           }
 
           if (
             !canSwapTwoOfTrump(me.hand, room.trumpCard, room.stock.length, true)
           ) {
+            rejectAction(
+              ws,
+              room,
+              `Troca do 2 de Trunfo não permitida agora (é preciso ter o 2 de ${SUIT_INFO[room.trumpSuit].name} e monte disponível).`
+            );
             return;
           }
 
           const twoCard = me.hand.find(
             (c) => c.suit === room.trumpSuit && c.rank === '2'
           );
-          if (!twoCard) return;
+          if (!twoCard) {
+            rejectAction(
+              ws,
+              room,
+              'Troca do 2 de Trunfo não permitida agora.'
+            );
+            return;
+          }
 
           const swappedCard = room.trumpCard;
           me.hand = sortHand(
@@ -741,16 +848,46 @@ async function startServer() {
           return;
         }
 
-        // 7. ACTIVATE 100 PI IMPERIAL POWER
+        // 8. ACTIVATE 100 PI IMPERIAL POWER
         if (msg.type === 'online:activate_power') {
-          if (
-            room.status !== 'PLAYING' ||
-            room.turnSeat !== mySeat ||
-            room.isResolvingTrick ||
-            me.impeto < 100 ||
-            me.powerUsedThisTurn ||
-            me.powerSelectionMode !== 'NONE'
-          ) {
+          if (room.status !== 'PLAYING') {
+            rejectAction(ws, room, 'A partida não está em andamento.');
+            return;
+          }
+          if (room.isResolvingTrick) {
+            rejectAction(ws, room, 'Aguarde a resolução da vaza.');
+            return;
+          }
+          if (room.turnSeat !== mySeat) {
+            rejectAction(
+              ws,
+              room,
+              'Você só pode ativar seu poder imperial na sua vez.'
+            );
+            return;
+          }
+          if (me.powerSelectionMode !== 'NONE') {
+            rejectAction(
+              ws,
+              room,
+              'Conclua a escolha do poder que está em andamento.'
+            );
+            return;
+          }
+          if (me.powerUsedThisTurn) {
+            rejectAction(
+              ws,
+              room,
+              'Você já usou seu poder imperial nesta vaza.'
+            );
+            return;
+          }
+          if (me.impeto < 100) {
+            rejectAction(
+              ws,
+              room,
+              `Ímpeto insuficiente: você tem ${me.impeto}/100 PI.`
+            );
             return;
           }
 
@@ -887,20 +1024,27 @@ async function startServer() {
           }
         }
 
-        // 8. PLAY CARD (OR SELECT POWER CARD)
+        // 9. PLAY CARD (OR SELECT POWER CARD)
         if (msg.type === 'online:play_card') {
-          if (
-            room.status !== 'PLAYING' ||
-            room.turnSeat !== mySeat ||
-            room.isResolvingTrick ||
-            room.currentTrick.length >= 2
-          ) {
+          if (room.status !== 'PLAYING') {
+            rejectAction(ws, room, 'A partida não está em andamento.');
+            return;
+          }
+          if (room.isResolvingTrick || room.currentTrick.length >= 2) {
+            rejectAction(ws, room, 'Aguarde a resolução da vaza.');
+            return;
+          }
+          if (room.turnSeat !== mySeat) {
+            rejectAction(ws, room, 'Não é a sua vez de jogar.');
             return;
           }
 
           const cardId = String(msg.cardId || '');
           const selectedCard = me.hand.find((c) => c.id === cardId);
-          if (!selectedCard) return;
+          if (!selectedCard) {
+            rejectAction(ws, room, 'Carta inválida: ela não está na sua mão.');
+            return;
+          }
 
           // Sub-state A: Dom Pedro II Conciliação Card Selection
           if (me.powerSelectionMode === 'SELECT_HAND_CARD_FOR_CONCILIACAO') {
@@ -973,6 +1117,21 @@ async function startServer() {
               isMeCoerced
             )
           ) {
+            const mustFollow =
+              Boolean(leadCard) &&
+              room.stock.length === 0 &&
+              room.mustFollowSuitInEndgame &&
+              leadCard !== null &&
+              me.hand.some((c) => c.suit === leadCard.suit);
+            rejectAction(
+              ws,
+              room,
+              mustFollow
+                ? `Jogada inválida: siga o naipe da vaza (${SUIT_INFO[leadCard!.suit].name}).`
+                : isMeCoerced
+                ? 'Coagido pelo Grito do Ipiranga: jogue sua carta de maior pontuação.'
+                : 'Jogada inválida.'
+            );
             return;
           }
 
@@ -1148,7 +1307,7 @@ async function startServer() {
           return;
         }
 
-        // 9. NEXT ROUND OR REMATCH
+        // 10. NEXT ROUND OR REMATCH
         if (msg.type === 'online:next_round') {
           if (room.status === 'ROUND_SUMMARY') {
             const nextLeader: 0 | 1 =
@@ -1156,6 +1315,8 @@ async function startServer() {
             startRoomRound(room, nextLeader, false, room.roundNumber + 1);
           } else if (room.status === 'GAME_OVER') {
             startRoomRound(room, 0, true, 1);
+          } else {
+            rejectAction(ws, room, 'Não há rodada para avançar agora.');
           }
           return;
         }
@@ -1171,6 +1332,7 @@ async function startServer() {
       );
       if (qIdx !== -1) {
         matchmakingQueue.splice(qIdx, 1);
+        broadcastQueuePositions();
       }
 
       if (!currentClientId) return;
@@ -1185,14 +1347,11 @@ async function startServer() {
         seatObj.ws = null;
       }
 
-      // If room was WAITING and host left, remove room
-      if (room.status === 'WAITING') {
-        rooms.delete(mapping.roomCode);
-        clientRoomMap.delete(currentClientId);
-        broadcastOpenRooms(wss);
-      } else {
-        broadcastRoomState(room);
-      }
+      // A mesa sobrevive a queda do socket durante a janela de graca (mesmo em
+      // WAITING), para o auto-rejoin via `room:join` retomar a mesma cadeira.
+      // A limpeza definitiva acontece no housekeeping apos ROOM_GRACE_PERIOD_MS.
+      broadcastRoomState(room);
+      broadcastOpenRooms(wss);
     });
   });
 
@@ -1217,7 +1376,6 @@ async function startServer() {
 
   // Housekeeping: abandoned tables and dead queue entries would otherwise pile
   // up for the whole life of the instance (rooms live in memory).
-  const ABANDONED_ROOM_TTL_MS = 5 * 60 * 1000;
   const housekeepingInterval = setInterval(() => {
     const now = Date.now();
     for (const [code, room] of rooms) {
@@ -1229,9 +1387,8 @@ async function startServer() {
       const everyoneGone = seats.every((s) => !s.connected);
       if (!everyoneGone) continue;
 
-      const abandoned =
-        room.status === 'WAITING' ||
-        now - (room.lastActivityAt || 0) > ABANDONED_ROOM_TTL_MS;
+      // Uniforme para WAITING e PLAYING: so remove depois da janela de graca.
+      const abandoned = now - (room.lastActivityAt || 0) > ROOM_GRACE_PERIOD_MS;
       if (!abandoned) continue;
 
       if (room.resolveTimer) clearTimeout(room.resolveTimer);
@@ -1239,11 +1396,14 @@ async function startServer() {
       seats.forEach((s) => clientRoomMap.delete(s.clientId));
     }
 
+    let queueChanged = false;
     for (let i = matchmakingQueue.length - 1; i >= 0; i--) {
       if (matchmakingQueue[i].ws.readyState !== WebSocket.OPEN) {
         matchmakingQueue.splice(i, 1);
+        queueChanged = true;
       }
     }
+    if (queueChanged) broadcastQueuePositions();
   }, 60000);
 
   // Vite middleware in development, static dist in production
