@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, MotionConfig } from 'motion/react';
 import {
   Volume2,
   VolumeX,
@@ -65,6 +65,7 @@ import {
   ParticleCanvasHandle,
 } from './components/ParticleCanvas';
 import { soundFx } from './utils/soundFx';
+import { prefersReducedMotion } from './utils/motionPreferences';
 
 const HERO_DEMO_CARDS: Card[] = [
   { id: 'A_espadas', suit: 'espadas', rank: 'A', points: 11, strength: 10 },
@@ -219,7 +220,7 @@ export default function App() {
   });
 
   // UI Overlays
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => soundFx.isMuted());
   const [isRulesOpen, setIsRulesOpen] = useState<boolean>(false);
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] =
     useState<boolean>(false);
@@ -263,6 +264,8 @@ export default function App() {
   const resolveTimerRef = useRef<number | null>(null);
   const sweepTimerRef = useRef<number | null>(null);
   const bigMomentTimerRef = useRef<number | null>(null);
+  const pauseDialogRef = useRef<HTMLDivElement | null>(null);
+  const summaryDialogRef = useRef<HTMLDivElement | null>(null);
   const playerBubbleTimerRef = useRef<number | null>(null);
   const botBubbleTimerRef = useRef<number | null>(null);
   const botResponseTimerRef = useRef<number | null>(null);
@@ -339,6 +342,8 @@ export default function App() {
   }, [clearTimers]);
 
   const triggerTableShake = useCallback((intensity: 'light' | 'heavy') => {
+    // Movimento reduzido: pulsa o tremor de tela (efeito puramente visual).
+    if (prefersReducedMotion()) return;
     setTableShakeMode(intensity);
     window.setTimeout(
       () => setTableShakeMode('none'),
@@ -348,6 +353,9 @@ export default function App() {
 
   const triggerScreenFlash = useCallback(
     (color: 'gold' | 'emerald' | 'crimson') => {
+      // Movimento reduzido: pulsa o flash de tela (o banner de evento ainda
+      // comunica o mesmo acontecimento em texto).
+      if (prefersReducedMotion()) return;
       setScreenFlash(color);
       window.setTimeout(() => setScreenFlash('none'), 380);
     },
@@ -2190,6 +2198,16 @@ export default function App() {
     startNewRound,
   ]);
 
+  // Foco ao abrir os modais: leitores de tela e navegação por teclado
+  // começam dentro do diálogo em vez de no tabuleiro atrás dele.
+  useEffect(() => {
+    if (gameState === 'PAUSED') {
+      pauseDialogRef.current?.focus();
+    } else if (gameState === 'ROUND_SUMMARY' || gameState === 'GAME_OVER') {
+      summaryDialogRef.current?.focus();
+    }
+  }, [gameState]);
+
   // Computed live telemetry values
   const playerCurrentPoints =
     matchMode === 'VS_ONLINE'
@@ -2243,6 +2261,7 @@ export default function App() {
       : '';
 
   return (
+    <MotionConfig reducedMotion="user">
     <div
       className={`relative w-screen h-[100dvh] overflow-hidden baize-surface select-none flex flex-col justify-between ${shakeClass}`}
     >
@@ -3308,6 +3327,20 @@ export default function App() {
                 )}
               </AnimatePresence>
 
+              {/* Opponent Speech Bubble — center of screen, above the cards we play */}
+              {matchMode === 'VS_BOT' && botStatusText && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="mb-2 flex items-center justify-center pointer-events-none z-20"
+                >
+                  <div className="max-w-[320px] rounded-2xl bg-[#D97706]/94 border border-[#FBBF24]/70 px-3.5 py-2 text-sm sm:text-base font-bold text-[#1B0E07] shadow-2xl drop-shadow-[0_0_24px_rgba(0,0,0,0.6)] text-center whitespace-pre-line">
+                    {botStatusText}
+                  </div>
+                </motion.div>
+              )}
+
               {/* Center Baize Inscribed Imperial Ring */}
               <div
                 className={`relative w-[290px] h-[134px] sm:w-[380px] sm:h-[235px] rounded-3xl border transition-colors duration-300 flex items-center justify-center gap-4 sm:gap-8 px-3 sm:px-4 shadow-inner ${
@@ -3337,21 +3370,11 @@ export default function App() {
                   </div>
                 ) : currentTrick.length === 0 ? (
                   <div className="text-center pointer-events-none px-4">
-                    <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
-                      {turnOwner === 'player'
-                        ? `Sua vez de puxar a vaza, ${displayUsername}`
-                        : matchMode === 'VS_ONLINE'
-                        ? `Aguardando jogada de ${opponentShortName}...`
-                        : botStatusText ||
-                          `${opponentShortName} inicia a vaza...`}
-                    </div>
-                    <div className="text-xs text-[#D6C7B2]/65 mt-1">
-                      {turnOwner === 'player'
-                        ? coercedPlayer === 'player'
-                          ? 'Grito do Ipiranga ativo: você deve jogar sua carta de maior pontuação!'
-                          : 'Clique em uma carta ou pressione 1–9 (ou P para Poder em 100 PI)'
-                        : 'Aguarde o lance na mesa'}
-                    </div>
+                    {matchMode === 'VS_ONLINE' && turnOwner !== 'player' ? (
+                      <div className="font-display text-sm sm:text-base text-[#E7DEC8]/85 font-semibold">
+                        Aguardando jogada de {opponentShortName}...
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <AnimatePresence>
@@ -3701,6 +3724,29 @@ export default function App() {
             </div>
             </div>
 
+            {/* Player Turn Cue (above your hand, bottom of screen) */}
+            {gameState === 'PLAYING' && turnOwner === 'player' && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                className="mb-2 pointer-events-none flex items-center justify-center"
+              >
+                <div className="max-w-[280px] rounded-xl bg-[#064E3B]/92 border border-[#FBBF24]/55 px-3 py-1.5 text-xs sm:text-sm font-semibold text-[#FBF7EE] shadow-lg drop-shadow-[0_0_16px_rgba(0,0,0,0.5)] text-center whitespace-pre-line">
+                  {currentTrick.length === 0
+                    ? coercedPlayer === 'player'
+                      ? 'Grito do Ipiranga: jogue sua carta de maior pontuação!'
+                      : `Sua vez de puxar a vaza, ${displayUsername}`
+                    : 'Sua vez de responder a vaza!'}
+                  <div className="text-[10px] text-[#D6C7B2]/70 mt-0.5 font-sans">
+                    {currentTrick.length === 0 && coercedPlayer !== 'player'
+                      ? 'Clique em uma carta ou pressione 1–9 (P para Poder)'
+                      : 'Escolha uma carta da sua mão'}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {/* Player Fanned Interactive Cards */}
             <div
               className="flex items-center justify-center pb-2 sm:pb-1 max-w-full"
@@ -3785,11 +3831,18 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="pause-title"
+          onClick={() => {
+            soundFx.playButtonTap();
+            setGameState('PLAYING');
+          }}
         >
           <motion.div
+            ref={pauseDialogRef}
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="w-full max-w-md rounded-2xl walnut-rail border border-[#FBBF24]/40 p-6 sm:p-7 text-center shadow-2xl space-y-5"
+            className="w-full max-w-md rounded-2xl walnut-rail border border-[#FBBF24]/40 p-6 sm:p-7 text-center shadow-2xl space-y-5 outline-none"
           >
             <div>
               <p className="text-xs text-[#FBBF24] uppercase tracking-widest">
@@ -3868,8 +3921,24 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="summary-title"
+            onClick={() => {
+              // Clique no backdrop avança a rodada (atalho do Enter).
+              // No GAME_OVER fica inerte para evitar avanço acidental.
+              if (gameState !== 'ROUND_SUMMARY') return;
+              soundFx.playButtonTap();
+              if (matchMode === 'VS_ONLINE') {
+                sendWsMessage({ type: 'online:next_round' });
+              } else {
+                const nextLeader: TurnOwner =
+                  roundSummary?.winner === 'bot' ? 'bot' : 'player';
+                startNewRound(gameMode, nextLeader, false, roundNumber + 1);
+              }
+            }}
           >
             <motion.div
+              ref={summaryDialogRef}
+              tabIndex={-1}
+              onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.82, opacity: 0, y: 24 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               transition={{
@@ -3877,7 +3946,7 @@ export default function App() {
                 stiffness: 320,
                 damping: 22,
               }}
-              className="w-full max-w-lg rounded-2xl walnut-rail border-2 border-[#FBBF24]/60 p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] space-y-6"
+              className="w-full max-w-lg rounded-2xl walnut-rail border-2 border-[#FBBF24]/60 p-6 sm:p-8 shadow-[0_25px_70px_rgba(0,0,0,0.9)] space-y-6 outline-none"
             >
               <div className="text-center">
                 <motion.div
@@ -4040,5 +4109,6 @@ export default function App() {
       {/* Rules, Impeto & Imperial Powers Modal */}
       <RulesModal isOpen={isRulesOpen} onClose={() => setIsRulesOpen(false)} />
     </div>
+    </MotionConfig>
   );
 }

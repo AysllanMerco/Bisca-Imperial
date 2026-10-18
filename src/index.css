@@ -95,6 +95,28 @@
   animation: goldenPulseBorder 2.6s ease-in-out infinite;
 }
 
+/* Acessibilidade: respeita a preferência do sistema por movimento reduzido.
+   Animações decorativas (flutuação, tremores, brilhos, pulse) são desligadas
+   e transições são encurtadas ao mínimo. O spinner de carregamento
+   (.animate-spin) é mantido por ser indicador funcional, não decorativo. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-float,
+  .animate-table-shake,
+  .animate-table-shake-heavy,
+  .card-high-value-glow,
+  .animate-pulse {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 /* Reta final (monte esgotado): vinheta âmbar/carmesim pulsante nas bordas */
 @keyframes endgameVignettePulse {
   0%, 100% { opacity: 0.5; }
@@ -120,5 +142,4 @@
 .animate-ring-tension {
   animation: ringTensionPulse 1.9s ease-in-out infinite;
 }
-
 
